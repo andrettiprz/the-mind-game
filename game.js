@@ -19,6 +19,7 @@ const database = getDatabase(app);
 let currentRoomId = null;
 let currentPlayer = null;
 let gameState = null;
+let isAdvancing = false; // Prevenir múltiples llamadas simultáneas
 
 const GAME_CONFIG = {
     2: { levels: 12, lives: 2, stars: 1 },
@@ -35,7 +36,6 @@ const LEVEL_REWARDS = {
     9: 'life'
 };
 
-// FUNCIÓN HELPER CRÍTICA: Siempre convierte a array
 function ensureArray(value) {
     if (!value) return [];
     if (Array.isArray(value)) return value;
@@ -148,6 +148,7 @@ function listenToRoom() {
     onValue(roomRef, (snapshot) => {
         const room = snapshot.val();
         if (!room) {
+            console.error('Sala cerrada');
             alert('La sala fue cerrada');
             location.reload();
             return;
@@ -156,6 +157,7 @@ function listenToRoom() {
             updateWaitingScreen(room);
         } else if (room.status === 'playing' && room.game) {
             gameState = room.game;
+            console.log('Estado del juego actualizado:', gameState);
             showGameScreen();
             updateGameUI();
         }
@@ -176,6 +178,7 @@ function updateWaitingScreen(room) {
 
 async function startGameFromWaiting() {
     try {
+        console.log('Iniciando juego...');
         const roomRef = ref(database, `rooms/${currentRoomId}`);
         const snapshot = await get(roomRef);
         const room = snapshot.val();
@@ -186,6 +189,8 @@ async function startGameFromWaiting() {
         players.forEach(player => {
             hands[player] = [deck.pop()];
         });
+        
+        console.log('Manos iniciales:', hands);
         
         await update(roomRef, {
             status: 'playing',
@@ -204,8 +209,11 @@ async function startGameFromWaiting() {
                 victory: false
             }
         });
+        
+        console.log('✓ Juego iniciado');
     } catch (error) {
-        console.error('Error al iniciar:', error);
+        console.error('ERROR al iniciar:', error);
+        alert('Error al iniciar: ' + error.message);
     }
 }
 
@@ -231,7 +239,10 @@ function showGameScreen() {
 
 function updateGameUI() {
     try {
-        if (!gameState || !gameState.hands) return;
+        if (!gameState || !gameState.hands) {
+            console.warn('updateGameUI: No hay gameState o hands');
+            return;
+        }
         
         document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
         document.getElementById('levelDisplay').textContent = gameState.level || 1;
@@ -271,48 +282,59 @@ function updateGameUI() {
         updateStarControl();
         
         if (gameState.gameOver) {
+            console.log('Mostrando pantalla de Game Over');
             showGameOver();
         }
     } catch (error) {
-        console.error('Error UI:', error);
+        console.error('ERROR en updateGameUI:', error);
     }
 }
 
 async function playCard(cardValue) {
     try {
-        // 1. Obtener estado FRESCO de Firebase
+        console.log(`\n=== JUGANDO CARTA ${cardValue} ===`);
+        
         const roomRef = ref(database, `rooms/${currentRoomId}/game`);
         const snapshot = await get(roomRef);
         const freshGame = snapshot.val();
         
         if (!freshGame || !freshGame.hands) {
-            console.log('No hay juego activo');
+            console.error('❌ No hay juego activo. Estado:', freshGame);
+            alert('Error: El juego no está activo. Recarga la página.');
             return;
         }
         
-        // 2. Obtener mano del jugador actual (asegurar array)
+        console.log('Estado fresco obtenido:', {
+            level: freshGame.level,
+            hands: freshGame.hands,
+            centralPile: freshGame.centralPile
+        });
+        
         const myHand = ensureArray(freshGame.hands[currentPlayer]);
+        console.log(`Mi mano (${currentPlayer}):`, myHand);
         
-        // 3. Validar que el jugador tiene esta carta
         if (!myHand.includes(cardValue)) {
-            console.log('No tienes esa carta');
+            console.warn(`❌ No tienes la carta ${cardValue}`);
             return;
         }
         
-        // 4. Validar que es una jugada válida (mayor que la última)
         const centralPile = freshGame.centralPile || [];
         if (centralPile.length > 0) {
             const lastCard = centralPile[centralPile.length - 1];
             if (cardValue < lastCard) {
-                // ERROR: carta menor
+                console.error(`❌ ERROR: ${cardValue} < ${lastCard}`);
                 await handleError(cardValue, freshGame);
                 return;
             }
         }
         
-        // 5. Jugar la carta (actualizar Firebase)
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
+        
+        console.log('Actualizando Firebase:', {
+            newHand,
+            newPile
+        });
         
         await update(roomRef, {
             [`hands/${currentPlayer}`]: newHand,
@@ -321,44 +343,61 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // 6. Verificar si el nivel se completó (CON DELAY)
+        // Verificar nivel completo
         setTimeout(async () => {
+            console.log('\n--- Verificando nivel completo ---');
             try {
                 const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}/game`));
                 const checkGame = checkSnapshot.val();
                 
-                if (!checkGame || !checkGame.hands || checkGame.gameOver) {
+                if (!checkGame || !checkGame.hands) {
+                    console.error('❌ No hay juego para verificar');
                     return;
                 }
                 
-                // CRÍTICO: Usar ensureArray para CADA mano
+                if (checkGame.gameOver) {
+                    console.log('⚠️ El juego ya terminó');
+                    return;
+                }
+                
+                console.log('Manos actuales:', checkGame.hands);
+                
                 const allEmpty = Object.keys(checkGame.hands).every(player => {
                     const handArray = ensureArray(checkGame.hands[player]);
+                    console.log(`  ${player}: ${handArray.length} cartas`);
                     return handArray.length === 0;
                 });
                 
-                console.log('Verificando nivel completo:', allEmpty);
+                console.log(`¿Todas vacías? ${allEmpty}`);
                 
-                if (allEmpty) {
-                    console.log('¡Todas las manos vacías! Avanzando nivel...');
+                if (allEmpty && !isAdvancing) {
+                    console.log('✓ ¡Nivel completo! Avanzando...');
                     await advanceLevel();
+                } else if (isAdvancing) {
+                    console.log('⚠️ Ya se está avanzando de nivel');
                 }
             } catch (error) {
-                console.error('Error verificando nivel:', error);
+                console.error('ERROR verificando nivel:', error);
             }
-        }, 1200); // 1.2 segundos para dar tiempo a Firebase
+        }, 1500);
         
     } catch (error) {
-        console.error('Error jugando carta:', error);
+        console.error('ERROR en playCard:', error);
+        alert('Error al jugar carta: ' + error.message);
     }
 }
 
 async function handleError(wrongCard, freshGame) {
     try {
+        console.log(`\n=== MANEJANDO ERROR (carta ${wrongCard}) ===`);
+        
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         const newLives = freshGame.lives - 1;
         
+        console.log(`Vidas: ${freshGame.lives} → ${newLives}`);
+        
         if (newLives <= 0) {
+            console.log('💔 GAME OVER');
             await update(gameRef, {
                 lives: 0,
                 gameOver: true,
@@ -371,11 +410,11 @@ async function handleError(wrongCard, freshGame) {
         const updates = { lives: newLives };
         const discarded = freshGame.discardedCards || [];
         
-        // Descartar TODAS las cartas <= wrongCard de TODAS las manos
         Object.keys(freshGame.hands).forEach(player => {
             const playerHand = ensureArray(freshGame.hands[player]);
             const toDiscard = playerHand.filter(c => c <= wrongCard);
             const newHand = playerHand.filter(c => c > wrongCard);
+            console.log(`  ${player}: descartando ${toDiscard}, quedan ${newHand}`);
             discarded.push(...toDiscard);
             updates[`hands/${player}`] = newHand;
         });
@@ -383,53 +422,71 @@ async function handleError(wrongCard, freshGame) {
         updates.discardedCards = discarded;
         
         await update(gameRef, updates);
-        alert(`❌ ¡Error! Carta ${wrongCard} jugada fuera de orden.\nPerdieron 1 vida. Cartas ≤${wrongCard} descartadas.`);
+        alert(`❌ Error! Carta ${wrongCard} fuera de orden.\nVidas: ${newLives}\nCartas ≤${wrongCard} descartadas.`);
         
+        console.log('✓ Error manejado');
     } catch (error) {
-        console.error('Error manejando error:', error);
+        console.error('ERROR en handleError:', error);
     }
 }
 
 async function advanceLevel() {
+    if (isAdvancing) {
+        console.log('⚠️ Ya hay un avance en progreso');
+        return;
+    }
+    
+    isAdvancing = true;
+    
     try {
+        console.log('\n=== AVANZANDO DE NIVEL ===');
+        
         const roomRef = ref(database, `rooms/${currentRoomId}`);
         const snapshot = await get(roomRef);
         const room = snapshot.val();
         
         if (!room || !room.game) {
-            console.log('No hay sala/juego para avanzar');
+            console.error('❌ No hay sala/juego');
+            isAdvancing = false;
             return;
         }
         
         const currentGame = room.game;
-        const nextLevel = currentGame.level + 1;
+        const currentLevel = currentGame.level;
+        const nextLevel = currentLevel + 1;
         
-        console.log(`Avanzando de nivel ${currentGame.level} a ${nextLevel}`);
+        console.log(`Nivel actual: ${currentLevel}, siguiente: ${nextLevel}`);
+        console.log(`Max niveles: ${currentGame.maxLevels}`);
         
         if (nextLevel > currentGame.maxLevels) {
-            // ¡VICTORIA!
+            console.log('🎉 ¡VICTORIA!');
             const gameRef = ref(database, `rooms/${currentRoomId}/game`);
             await update(gameRef, {
                 gameOver: true,
                 victory: true
             });
+            isAdvancing = false;
             return;
         }
         
-        // Aplicar recompensas
         let newLives = currentGame.lives;
         let newStars = currentGame.stars;
         
-        const reward = LEVEL_REWARDS[currentGame.level];
-        if (reward === 'life' && newLives < 5) newLives++;
-        if (reward === 'star' && newStars < 3) newStars++;
+        const reward = LEVEL_REWARDS[currentLevel];
+        if (reward === 'life' && newLives < 5) {
+            newLives++;
+            console.log(`Recompensa: +1 vida (${newLives})`);
+        }
+        if (reward === 'star' && newStars < 3) {
+            newStars++;
+            console.log(`Recompensa: +1 estrella (${newStars})`);
+        }
         
-        // Repartir cartas para el nuevo nivel
         const deck = generateDeck();
         const hands = {};
         const players = Object.keys(currentGame.hands);
         
-        console.log(`Repartiendo ${nextLevel} cartas a cada jugador`);
+        console.log(`Repartiendo ${nextLevel} cartas a ${players.length} jugadores`);
         
         players.forEach(player => {
             const hand = [];
@@ -439,10 +496,13 @@ async function advanceLevel() {
                 }
             }
             hands[player] = hand;
-            console.log(`${player} recibió:`, hand);
+            console.log(`  ${player}: [${hand.join(', ')}]`);
         });
         
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
+        
+        console.log('Actualizando Firebase...');
+        
         await update(gameRef, {
             level: nextLevel,
             lives: newLives,
@@ -455,14 +515,21 @@ async function advanceLevel() {
             starVotes: {}
         });
         
-        let rewardText = '';
-        if (reward === 'life') rewardText = ' ¡+1 ❤️!';
-        if (reward === 'star') rewardText = ' ¡+1 ⭐!';
+        console.log('✓ Nivel actualizado en Firebase');
         
-        alert(`✅ ¡Nivel ${currentGame.level} completado!${rewardText}\n\nAvanzando al nivel ${nextLevel}...`);
+        let rewardText = '';
+        if (reward === 'life') rewardText = '\n¡+1 ❤️!';
+        if (reward === 'star') rewardText = '\n¡+1 ⭐!';
+        
+        alert(`✅ ¡Nivel ${currentLevel} completado!${rewardText}\n\nAvanzando al nivel ${nextLevel}...`);
+        
+        isAdvancing = false;
+        console.log('✓ Avance completado\n');
         
     } catch (error) {
-        console.error('Error avanzando nivel:', error);
+        console.error('ERROR CRÍTICO en advanceLevel:', error);
+        alert('Error al avanzar de nivel: ' + error.message);
+        isAdvancing = false;
     }
 }
 
@@ -490,11 +557,21 @@ async function voteStarNo() {
 }
 
 async function checkStarVotes() {
-    if (!gameState || !gameState.starProposal || !gameState.hands) return;
-    const players = Object.keys(gameState.hands);
-    const votes = Object.keys(gameState.starVotes || {});
-    if (votes.length === players.length && votes.every(p => gameState.starVotes[p])) {
-        await useStar();
+    try {
+        const roomRef = ref(database, `rooms/${currentRoomId}/game`);
+        const snapshot = await get(roomRef);
+        const freshGame = snapshot.val();
+
+        if (!freshGame || !freshGame.starProposal || !freshGame.hands) return;
+        
+        const players = Object.keys(freshGame.hands);
+        const votes = Object.keys(freshGame.starVotes || {});
+        
+        if (votes.length === players.length) {
+            await useStar();
+        }
+    } catch (error) {
+        console.error('ERROR en checkStarVotes:', error);
     }
 }
 
@@ -530,7 +607,7 @@ async function useStar() {
         alert('⭐ Estrella ninja usada! Cada jugador descartó su carta más baja.');
         
     } catch (error) {
-        console.error('Error usando estrella:', error);
+        console.error('ERROR en useStar:', error);
     }
 }
 
