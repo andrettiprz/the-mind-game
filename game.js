@@ -422,6 +422,10 @@ function updateGameUI() {
 // PLAY CARD (MODIFICADA PARA USAR EL CHEQUEO ESTABLE)
 // ============================================
 
+// ============================================
+// PLAY CARD (VERSION FINAL Y ROBUSTA)
+// ============================================
+
 async function playCard(cardValue) {
     try {
         console.log(`\n=== JUGANDO CARTA ${cardValue} ===`);
@@ -450,18 +454,43 @@ async function playCard(cardValue) {
             return;
         }
         
-        // Verificar orden correcto
+        // 1. CHEQUEO DE ERROR EXPLÍCITO (Carta < Última jugada)
         const centralPile = ensureArray(freshGame.centralPile);
         if (centralPile.length > 0) {
             const lastCard = centralPile[centralPile.length - 1];
             if (cardValue < lastCard) {
-                console.error(`❌ ERROR: ${cardValue} < ${lastCard}`);
+                console.error(`❌ ERROR EXPLÍCITO: ${cardValue} < ${lastCard}`);
                 await handleError(cardValue, freshGame);
                 return;
             }
         }
         
-        // Actualizar estado (se deja que Firebase borre la clave si la mano queda vacía)
+        // 2. CHEQUEO DE ERROR IMPLÍCITO (Salto de carta en otra mano)
+        let allCards = [];
+        Object.keys(freshGame.hands).forEach(player => {
+            const hand = ensureArray(freshGame.hands[player]);
+            // Agrega solo las cartas que NO se están jugando en este turno (las cartas restantes)
+            if (player === currentPlayer) {
+                 allCards.push(...hand.filter(c => c !== cardValue));
+            } else {
+                 allCards.push(...hand);
+            }
+        });
+        
+        const lowestRemainingCard = allCards.length > 0 ? Math.min(...allCards) : null;
+        
+        if (lowestRemainingCard !== null && cardValue > lowestRemainingCard) {
+            // Error implícito: Jugaste una carta (cardValue) que es más alta 
+            // que la carta más baja (lowestRemainingCard) que quedó en juego.
+            
+            console.error(`❌ ERROR IMPLÍCITO: ${cardValue} jugada, pero ${lowestRemainingCard} sigue en juego.`);
+            // Usamos lowestRemainingCard como la carta de referencia para el descarte.
+            // La carta jugada (cardValue) ya se considera 'jugada', pero el error se basa en la que se quedó.
+            await handleError(lowestRemainingCard, freshGame); 
+            return;
+        }
+        
+        // 3. JUGADA VÁLIDA: Actualizar estado
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
         
@@ -472,7 +501,7 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // Programar verificación de nivel completo (se llama a la función estable)
+        // Programar verificación de nivel completo
         checkLevelTimeout = setTimeout(() => {
             checkLevelComplete();
         }, 2000); 
@@ -483,6 +512,8 @@ async function playCard(cardValue) {
     }
 }
 
+// **Nota Importante:** La función handleError ya está implementada
+// correctamente para manejar el descarte y la pérdida de vida.
 // ============================================
 // CHECK LEVEL COMPLETE (SOLUCIÓN DEFINITIVA)
 // ============================================
