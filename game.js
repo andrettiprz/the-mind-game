@@ -359,59 +359,6 @@ async function playCard(cardValue) {
     }
 }
 
-// NUEVA FUNCIÓN: Verificar nivel completo con reintentos
-async function checkLevelCompleteWithRetry(attempt = 1) {
-    const MAX_ATTEMPTS = 3;
-    
-    console.log(`\n--- Verificando nivel completo (intento ${attempt}/${MAX_ATTEMPTS}) ---`);
-    
-    try {
-        const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}`));
-        const checkRoom = checkSnapshot.val();
-
-        if (!checkRoom || checkRoom.status !== 'playing' || !checkRoom.game) {
-            console.error('❌ Sala o juego no válidos');
-            return;
-        }
-
-        const checkGame = checkRoom.game;
-        
-        if (checkGame.gameOver) {
-            console.log('⚠️ El juego ya terminó');
-            return;
-        }
-        
-        // SI HANDS NO ESTÁ DISPONIBLE, REINTENTAR
-        if (!checkGame.hands) {
-            console.warn('⚠️ hands no disponible, reintentando...');
-            if (attempt < MAX_ATTEMPTS) {
-                setTimeout(() => checkLevelCompleteWithRetry(attempt + 1), 1000);
-            } else {
-                console.error('❌ No se pudo verificar después de 3 intentos');
-            }
-            return;
-        }
-        
-        console.log('Manos actuales:', checkGame.hands);
-        
-        const allEmpty = Object.keys(checkGame.hands).every(player => {
-            const handArray = ensureArray(checkGame.hands[player]);
-            console.log(`  ${player}: ${handArray.length} cartas`);
-            return handArray.length === 0;
-        });
-        
-        console.log(`¿Todas vacías? ${allEmpty}`);
-        
-        if (allEmpty && !isAdvancing) {
-            console.log('✓ ¡Nivel completo! Avanzando...');
-            await advanceLevel();
-        } else if (isAdvancing) {
-            console.log('⚠️ Ya se está avanzando de nivel');
-        }
-    } catch (error) {
-        console.error('ERROR verificando nivel:', error);
-    }
-}
 
 // NUEVA FUNCIÓN: Verificar nivel completo con reintentos
 async function checkLevelCompleteWithRetry(attempt = 1) {
