@@ -19,7 +19,7 @@ const database = getDatabase(app);
 let currentRoomId = null;
 let currentPlayer = null;
 let gameState = null;
-let isAdvancing = false; // Prevenir múltiples llamadas simultáneas
+let isAdvancing = false;
 
 const GAME_CONFIG = {
     2: { levels: 12, lives: 2, stars: 1 },
@@ -239,14 +239,13 @@ function showGameScreen() {
 
 function updateGameUI() {
     try {
-        // CHEQUEO CRÍTICO: Verificar que gameState Y hands existen
         if (!gameState) {
             console.warn('updateGameUI: No hay gameState');
             return;
         }
         
         if (!gameState.hands) {
-            console.warn('updateGameUI: gameState.hands es undefined, esperando actualización...');
+            console.warn('updateGameUI: gameState.hands es undefined, esperando...');
             return;
         }
         
@@ -295,7 +294,6 @@ function updateGameUI() {
         console.error('ERROR en updateGameUI:', error);
     }
 }
-
 
 async function playCard(cardValue) {
     try {
@@ -350,16 +348,15 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // VERIFICAR NIVEL COMPLETO CON DELAY Y CHEQUEO CRÍTICO
+        // VERIFICAR NIVEL COMPLETO CON DELAY MÁS LARGO
         setTimeout(async () => {
             console.log('\n--- Verificando nivel completo ---');
             try {
-                // Leer la SALA completa (más estable)
                 const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}`));
                 const checkRoom = checkSnapshot.val();
 
                 if (!checkRoom || checkRoom.status !== 'playing' || !checkRoom.game) {
-                    console.error('❌ Sala o juego no válidos para verificar');
+                    console.error('❌ Sala o juego no válidos');
                     return;
                 }
 
@@ -370,9 +367,8 @@ async function playCard(cardValue) {
                     return;
                 }
                 
-                // ¡CHEQUEO CRÍTICO! Verificar que hands existe
                 if (!checkGame.hands) {
-                    console.error('❌ La clave "hands" no existe en el estado del juego');
+                    console.warn('⚠️ hands no está disponible aún, esperando...');
                     return;
                 }
                 
@@ -395,15 +391,13 @@ async function playCard(cardValue) {
             } catch (error) {
                 console.error('ERROR verificando nivel:', error);
             }
-        }, 1500);
+        }, 2000); // AUMENTADO A 2 SEGUNDOS
         
     } catch (error) {
         console.error('ERROR en playCard:', error);
         alert('Error al jugar carta: ' + error.message);
     }
 }
-
-
 
 async function handleError(wrongCard, freshGame) {
     try {
@@ -487,7 +481,6 @@ async function advanceLevel() {
             return;
         }
         
-        // Calcular recompensas
         let newLives = currentGame.lives;
         let newStars = currentGame.stars;
         
@@ -501,7 +494,6 @@ async function advanceLevel() {
             console.log(`Recompensa: +1 estrella (${newStars})`);
         }
         
-        // Generar NUEVO MAZO y repartir cartas
         const deck = generateDeck();
         const hands = {};
         const players = Object.keys(currentGame.hands);
@@ -523,6 +515,7 @@ async function advanceLevel() {
         
         console.log('Actualizando Firebase...');
         
+        // ACTUALIZACIÓN ATÓMICA: Todo en una sola llamada
         await update(gameRef, {
             level: nextLevel,
             lives: newLives,
@@ -552,8 +545,6 @@ async function advanceLevel() {
         isAdvancing = false;
     }
 }
-
-
 
 async function proposeStar() {
     if (!gameState || gameState.stars <= 0) return;
