@@ -1286,72 +1286,81 @@ async function useStar() {
  * Updates UI for star proposal/voting based ONLY on local gameState.
  * This version is NOT async to simplify logic and avoid potential timing issues.
  */
+/**
+ * Updates UI for star proposal/voting based ONLY on local gameState.
+ * Explicitly checks for null to determine proposal status.
+ */
 function updateStarControl() {
-    // Get references to UI elements
+    // Get references (asegúrate que estos IDs existen en tu HTML)
     const proposeBtn = document.getElementById('proposeStarBtn');
     const starVotesEl = document.getElementById('starVotes');
     const starMessage = document.getElementById('starMessage');
     const starVoteStatus = document.getElementById('starVoteStatus');
 
-    // Exit if elements are not found (e.g., user is not on the game screen)
+    // Exit if elements are not found
     if (!proposeBtn || !starVotesEl || !starMessage || !starVoteStatus) {
-        // console.log("updateStarControl: Elementos UI de estrella no encontrados."); // Optional log
+        // console.warn("updateStarControl: Elementos UI de estrella no encontrados.");
         return;
     }
 
-    // Ensure gameState is available before proceeding
+    // Ensure gameState is available
     if (!gameState) {
-        console.warn("updateStarControl: gameState es nulo. Ocultando controles de estrella.");
+        // Hide controls if no game state
         proposeBtn.classList.add('hidden');
         starVotesEl.classList.add('hidden');
-        proposeBtn.disabled = true; // Ensure it's disabled if no game state
+        proposeBtn.disabled = true;
         starMessage.textContent = '';
         starVoteStatus.textContent = '';
         return;
     }
 
-    // Determine conditions based on current gameState
-    const hasStars = gameState.stars > 0;
-    const proposalActive = gameState.starProposal !== null;
+    // --- Determine conditions based on current gameState ---
+    const hasStars = (gameState.stars ?? 0) > 0; // Use nullish coalescing for safety
+    // **** CRÍTICO: Chequea específicamente que NO sea null ****
+    const proposalActive = gameState.starProposal !== null && gameState.starProposal !== undefined;
 
-    // Log the conditions for easier debugging
+    // Log conditions for debugging
     console.log(`updateStarControl: Has Stars=${hasStars}, Proposal Active=${proposalActive} (Proposer: ${gameState.starProposal}, Stars: ${gameState.stars})`);
 
     // --- Logic for Propose Button ---
-    // Disable the button if the player has no stars OR if a proposal is already active
     proposeBtn.disabled = !hasStars || proposalActive;
 
     if (proposalActive) {
         // --- A proposal IS active ---
-        proposeBtn.classList.add('hidden'); // Hide the propose button
-        starVotesEl.classList.remove('hidden'); // Show the Yes/No vote buttons
-        starMessage.textContent = `${escapeHtml(gameState.starProposal)} propone usar estrella`; // Show who proposed
+        proposeBtn.classList.add('hidden');
+        starVotesEl.classList.remove('hidden');
+        starMessage.textContent = `${escapeHtml(gameState.starProposal || 'Alguien')} propone usar estrella`; // Fallback text
 
         // Update vote status text
-        const votes = gameState.starVotes || {}; // Default to empty object if null/undefined
+        const votes = gameState.starVotes || {};
         const voteCount = Object.keys(votes).length;
 
-        // Estimate player count based on current hands (less reliable but avoids async)
-        // Use a default of 2 if hands is missing
-        const playerCountEstimate = gameState.hands ? Object.keys(gameState.hands).length : 2;
-        starVoteStatus.textContent = `Votos: ${voteCount}/${playerCountEstimate}?`; // Add '?' to indicate it's an estimate
+        // Estimate player count (best effort without async)
+        let playerCountEstimate = 2; // Default if hands missing
+        if (gameState.hands) {
+             playerCountEstimate = Object.keys(gameState.hands).length;
+             // Refine estimate based on players actually in the room if available from previous state? Less reliable.
+        } else if (previousGameState?.players) {
+             playerCountEstimate = Object.keys(previousGameState.players).length;
+        }
 
-        // Disable vote buttons if the current player has already voted
+        starVoteStatus.textContent = `Votos: ${voteCount}/${playerCountEstimate}?`;
+
+        // Disable vote buttons if already voted
         const yesBtn = starVotesEl.querySelector('button:first-child');
         const noBtn = starVotesEl.querySelector('button:last-child');
         if (yesBtn && noBtn) {
-            // Check if the currentPlayer key exists in the votes object
             const alreadyVoted = votes.hasOwnProperty(currentPlayer);
             yesBtn.disabled = alreadyVoted;
-            noBtn.disabled = alreadyVoted; // Disable both once voted
+            noBtn.disabled = alreadyVoted;
         }
 
     } else {
         // --- NO proposal is active ---
-        proposeBtn.classList.remove('hidden'); // Show the propose button
-        starVotesEl.classList.add('hidden'); // Hide the Yes/No vote buttons
-        starMessage.textContent = '¿Usar estrella ninja?'; // Reset message
-        starVoteStatus.textContent = ''; // Clear vote status
+        proposeBtn.classList.remove('hidden');
+        starVotesEl.classList.add('hidden');
+        starMessage.textContent = '¿Usar estrella ninja?';
+        starVoteStatus.textContent = '';
     }
 }
 
