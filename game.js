@@ -359,7 +359,6 @@ async function playCard(cardValue) {
     }
 }
 
-
 // NUEVA FUNCIÓN: Verificar nivel completo con reintentos
 async function checkLevelCompleteWithRetry(attempt = 1) {
     const MAX_ATTEMPTS = 3;
@@ -384,7 +383,7 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
         
         // SI HANDS NO ESTÁ DISPONIBLE, REINTENTAR
         if (!checkGame.hands) {
-            console.warn(`⚠️ hands no disponible en intento ${attempt}, reintentando...`);
+            console.warn('⚠️ hands no disponible, reintentando...');
             if (attempt < MAX_ATTEMPTS) {
                 setTimeout(() => checkLevelCompleteWithRetry(attempt + 1), 1000);
             } else {
@@ -413,6 +412,9 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
         console.error('ERROR verificando nivel:', error);
     }
 }
+
+// NUEVA FUNCIÓN: Verificar nivel completo con reintentos
+
 
 
 async function handleError(wrongCard, freshGame) {
