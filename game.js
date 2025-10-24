@@ -20,7 +20,7 @@ let currentRoomId = null;
 let currentPlayer = null;
 let gameState = null;
 let isAdvancing = false;
-let isCheckingLevel = false;
+let checkLevelTimeout = null;
 
 const GAME_CONFIG = {
     2: { levels: 12, lives: 2, stars: 1 },
@@ -252,7 +252,6 @@ function listenToRoom() {
             updateWaitingScreen(room);
         } else if (room.status === 'playing' && room.game) {
             gameState = room.game;
-            console.log('Estado del juego actualizado');
             showGameScreen();
             updateGameUI();
         }
@@ -333,53 +332,73 @@ async function startGameFromWaiting() {
 
 function updateGameUI() {
     try {
-        if (!gameState || !gameState.hands) {
-            console.warn('No hay estado de juego válido');
+        if (!gameState) {
+            console.warn('No hay gameState');
+            return;
+        }
+        
+        if (!gameState.hands) {
+            console.warn('gameState.hands no está disponible, esperando...');
             return;
         }
         
         // Vidas
-        document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
+        const livesDisplay = document.getElementById('livesDisplay');
+        if (livesDisplay) {
+            livesDisplay.innerHTML = '❤️'.repeat(gameState.lives || 0);
+        }
         
         // Nivel
-        document.getElementById('levelDisplay').textContent = gameState.level || 1;
+        const levelDisplay = document.getElementById('levelDisplay');
+        if (levelDisplay) {
+            levelDisplay.textContent = gameState.level || 1;
+        }
         
         // Estrellas
-        document.getElementById('starsDisplay').innerHTML = '⭐'.repeat(gameState.stars || 0);
+        const starsDisplay = document.getElementById('starsDisplay');
+        if (starsDisplay) {
+            starsDisplay.innerHTML = '⭐'.repeat(gameState.stars || 0);
+        }
         
         // Pila central
         const centralPile = document.getElementById('centralPile');
-        if (!gameState.centralPile || gameState.centralPile.length === 0) {
-            centralPile.innerHTML = '<p class="text-6xl opacity-30">---</p><p class="text-sm mt-4 opacity-60">Esperando primera carta...</p>';
-        } else {
-            const lastCard = gameState.centralPile[gameState.centralPile.length - 1];
-            centralPile.innerHTML = `<div class="text-8xl font-bold">${lastCard}</div>`;
+        if (centralPile) {
+            if (!gameState.centralPile || gameState.centralPile.length === 0) {
+                centralPile.innerHTML = '<p class="text-6xl opacity-30">---</p><p class="text-sm mt-4 opacity-60">Esperando primera carta...</p>';
+            } else {
+                const lastCard = gameState.centralPile[gameState.centralPile.length - 1];
+                centralPile.innerHTML = `<div class="text-8xl font-bold">${lastCard}</div>`;
+            }
         }
         
         // Historial de cartas jugadas
         const cardsPlayedList = document.getElementById('cardsPlayedList');
-        if (gameState.centralPile && gameState.centralPile.length > 0) {
-            cardsPlayedList.innerHTML = gameState.centralPile.map(card => 
-                `<div class="bg-white/20 px-3 py-1 rounded text-sm">${card}</div>`
-            ).join('');
-        } else {
-            cardsPlayedList.innerHTML = '';
+        if (cardsPlayedList) {
+            if (gameState.centralPile && gameState.centralPile.length > 0) {
+                cardsPlayedList.innerHTML = gameState.centralPile.map(card => 
+                    `<div class="bg-white/20 px-3 py-1 rounded text-sm">${card}</div>`
+                ).join('');
+            } else {
+                cardsPlayedList.innerHTML = '';
+            }
         }
         
         // Mano del jugador
         const myHand = ensureArray(gameState.hands[currentPlayer]);
         const handDiv = document.getElementById('playerHand');
         
-        if (myHand.length === 0) {
-            handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
-        } else {
-            const sortedHand = [...myHand].sort((a, b) => a - b);
-            handDiv.innerHTML = sortedHand.map(card => 
-                `<button onclick="playCard(${card})" 
-                    class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
-                    ${card}
-                </button>`
-            ).join('');
+        if (handDiv) {
+            if (myHand.length === 0) {
+                handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
+            } else {
+                const sortedHand = [...myHand].sort((a, b) => a - b);
+                handDiv.innerHTML = sortedHand.map(card => 
+                    `<button onclick="playCard(${card})" 
+                        class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
+                        ${card}
+                    </button>`
+                ).join('');
+            }
         }
         
         // Control de estrellas
@@ -403,9 +422,15 @@ async function playCard(cardValue) {
     try {
         console.log(`\n=== JUGANDO CARTA ${cardValue} ===`);
         
+        // Cancelar verificación pendiente
+        if (checkLevelTimeout) {
+            clearTimeout(checkLevelTimeout);
+            checkLevelTimeout = null;
+        }
+        
         // Obtener estado fresco
-        const roomRef = ref(database, `rooms/${currentRoomId}/game`);
-        const snapshot = await get(roomRef);
+        const gameRef = ref(database, `rooms/${currentRoomId}/game`);
+        const snapshot = await get(gameRef);
         const freshGame = snapshot.val();
         
         if (!freshGame || !freshGame.hands) {
@@ -436,17 +461,17 @@ async function playCard(cardValue) {
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
         
-        await update(roomRef, {
-            [`hands/${currentPlayer}`]: newHand.length > 0 ? newHand : [],
+        await update(gameRef, {
+            [`hands/${currentPlayer}`]: newHand,
             centralPile: newPile
         });
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // Verificar nivel completo después de un delay
-        setTimeout(() => {
+        // Programar verificación de nivel completo
+        checkLevelTimeout = setTimeout(() => {
             checkLevelComplete();
-        }, 1500);
+        }, 2000);
         
     } catch (error) {
         console.error('ERROR en playCard:', error);
@@ -459,12 +484,10 @@ async function playCard(cardValue) {
 // ============================================
 
 async function checkLevelComplete() {
-    if (isCheckingLevel || isAdvancing) {
-        console.log('⚠️ Ya hay una verificación/avance en progreso');
+    if (isAdvancing) {
+        console.log('⚠️ Ya hay un avance en progreso');
         return;
     }
-    
-    isCheckingLevel = true;
     
     try {
         console.log('\n--- Verificando si el nivel está completo ---');
@@ -474,41 +497,35 @@ async function checkLevelComplete() {
         
         if (!checkGame || checkGame.gameOver) {
             console.log('⚠️ Juego no válido o ya terminado');
-            isCheckingLevel = false;
             return;
         }
         
         if (!checkGame.hands) {
-            console.log('⚠️ No hay manos');
-            isCheckingLevel = false;
+            console.log('⚠️ No hay manos disponibles');
             return;
         }
         
         // Verificar si todos los jugadores tienen manos vacías
         const players = Object.keys(checkGame.hands);
-        let allHandsEmpty = true;
+        let totalCards = 0;
         
         for (const player of players) {
             const hand = ensureArray(checkGame.hands[player]);
+            totalCards += hand.length;
             console.log(`  ${player}: ${hand.length} cartas`);
-            if (hand.length > 0) {
-                allHandsEmpty = false;
-                break;
-            }
         }
         
-        if (allHandsEmpty) {
+        console.log(`Total de cartas restantes: ${totalCards}`);
+        
+        if (totalCards === 0) {
             console.log('✅ ¡Todas las manos vacías! Avanzando nivel...');
-            isCheckingLevel = false;
             await advanceLevel();
         } else {
             console.log('⏳ Nivel aún incompleto');
-            isCheckingLevel = false;
         }
         
     } catch (error) {
         console.error('ERROR verificando nivel:', error);
-        isCheckingLevel = false;
     }
 }
 
@@ -548,7 +565,7 @@ async function handleError(wrongCard, freshGame) {
             console.log(`  ${player}: descartando [${toDiscard.join(', ')}], quedan [${newHand.join(', ')}]`);
             
             discarded.push(...toDiscard);
-            updates[`hands/${player}`] = newHand.length > 0 ? newHand : [];
+            updates[`hands/${player}`] = newHand;
         });
         
         updates.discardedCards = discarded;
@@ -557,6 +574,9 @@ async function handleError(wrongCard, freshGame) {
         alert(`❌ ¡Error! Carta ${wrongCard} fuera de orden.\n\nVidas restantes: ${newLives}\nCartas ≤${wrongCard} descartadas.`);
         
         console.log('✓ Error manejado correctamente');
+        
+        // Verificar si el nivel se completó después del error
+        setTimeout(() => checkLevelComplete(), 1000);
         
     } catch (error) {
         console.error('ERROR en handleError:', error);
@@ -638,7 +658,7 @@ async function advanceLevel() {
             console.log(`  ${player}: [${hand.sort((a, b) => a - b).join(', ')}]`);
         });
         
-        // Actualizar en Firebase
+        // Actualizar en Firebase (una sola vez)
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         
         await update(gameRef, {
@@ -773,6 +793,9 @@ async function useStar() {
         alert('⭐ ¡Estrella ninja usada!\nCada jugador descartó su carta más baja.');
         console.log('✓ Estrella usada correctamente');
         
+        // Verificar si el nivel se completó después de usar la estrella
+        setTimeout(() => checkLevelComplete(), 1000);
+        
     } catch (error) {
         console.error('ERROR en useStar:', error);
         alert('Error al usar estrella: ' + error.message);
@@ -847,7 +870,7 @@ function showGameOver() {
 }
 
 // ============================================
-// INIT
+// INITIALIZE
 // ============================================
 
 listenToRooms();
