@@ -418,6 +418,10 @@ function updateGameUI() {
 // PLAY CARD
 // ============================================
 
+// ============================================
+// PLAY CARD (MODIFICADA PARA USAR EL CHEQUEO ESTABLE)
+// ============================================
+
 async function playCard(cardValue) {
     try {
         console.log(`\n=== JUGANDO CARTA ${cardValue} ===`);
@@ -434,7 +438,7 @@ async function playCard(cardValue) {
         const freshGame = snapshot.val();
         
         if (!freshGame || !freshGame.hands) {
-            console.error('❌ No hay juego activo');
+            console.error('❌ No hay juego activo.');
             alert('Error: El juego no está activo. Recarga la página.');
             return;
         }
@@ -457,7 +461,7 @@ async function playCard(cardValue) {
             }
         }
         
-        // Actualizar estado
+        // Actualizar estado (se deja que Firebase borre la clave si la mano queda vacía)
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
         
@@ -468,10 +472,10 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // Programar verificación de nivel completo
+        // Programar verificación de nivel completo (se llama a la función estable)
         checkLevelTimeout = setTimeout(() => {
             checkLevelComplete();
-        }, 2000);
+        }, 2000); 
         
     } catch (error) {
         console.error('ERROR en playCard:', error);
@@ -480,7 +484,7 @@ async function playCard(cardValue) {
 }
 
 // ============================================
-// CHECK LEVEL COMPLETE
+// CHECK LEVEL COMPLETE (SOLUCIÓN DEFINITIVA)
 // ============================================
 
 async function checkLevelComplete() {
@@ -490,33 +494,36 @@ async function checkLevelComplete() {
     }
     
     try {
-        console.log('\n--- Verificando si el nivel está completo ---');
+        console.log('\n--- Verificando si el nivel está completo (Estable) ---');
         
-        const snapshot = await get(ref(database, `rooms/${currentRoomId}/game`));
-        const checkGame = snapshot.val();
+        // 1. Obtener el estado del juego
+        const gameSnapshot = await get(ref(database, `rooms/${currentRoomId}/game`));
+        const checkGame = gameSnapshot.val();
         
-        if (!checkGame || checkGame.gameOver) {
+        // 2. Obtener la lista de jugadores estables (desde /rooms/{id}/players)
+        const playersSnapshot = await get(ref(database, `rooms/${currentRoomId}/players`));
+        const roomPlayers = playersSnapshot.val();
+        
+        if (!checkGame || checkGame.gameOver || !roomPlayers) {
             console.log('⚠️ Juego no válido o ya terminado');
             return;
         }
         
-        if (!checkGame.hands) {
-            console.log('⚠️ No hay manos disponibles');
-            return;
-        }
-        
-        // Verificar si todos los jugadores tienen manos vacías
-        const players = Object.keys(checkGame.hands);
+        const playerList = Object.keys(roomPlayers);
         let totalCards = 0;
         
-        for (const player of players) {
-            const hand = ensureArray(checkGame.hands[player]);
+        // 3. Iterar sobre la lista estable de jugadores y CONTAR cartas
+        for (const player of playerList) {
+            // CRÍTICO: Si checkGame.hands[player] es null/undefined (borrado por Firebase), ensureArray devuelve [].
+            const handValue = checkGame.hands ? checkGame.hands[player] : null;
+            const hand = ensureArray(handValue);
             totalCards += hand.length;
             console.log(`  ${player}: ${hand.length} cartas`);
         }
         
         console.log(`Total de cartas restantes: ${totalCards}`);
         
+        // 4. Avance de Nivel
         if (totalCards === 0) {
             console.log('✅ ¡Todas las manos vacías! Avanzando nivel...');
             await advanceLevel();
@@ -529,6 +536,7 @@ async function checkLevelComplete() {
     }
 }
 
+// **Nota:** El resto de tus funciones (`advanceLevel`, `handleError`, etc.) son correctas y estables.
 // ============================================
 // HANDLE ERROR
 // ============================================
