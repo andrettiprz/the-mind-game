@@ -22,6 +22,7 @@ const database = getDatabase(app);
 let currentRoomId = null;
 let currentPlayer = null;
 let gameState = null;
+let checkingLevel = false;
 
 // Configuración según número de jugadores
 const GAME_CONFIG = {
@@ -30,7 +31,7 @@ const GAME_CONFIG = {
     4: { levels: 8, lives: 4, stars: 1 }
 };
 
-// Recompensas por nivel (vidas o estrellas)
+// Recompensas por nivel
 const LEVEL_REWARDS = {
     2: 'star',
     3: 'life',
@@ -124,7 +125,6 @@ async function createRoom() {
         config: config
     });
     
-    // Configurar desconexión
     const playerRef = ref(database, `rooms/${currentRoomId}/players/${playerName}`);
     onDisconnect(playerRef).remove();
     
@@ -192,9 +192,15 @@ function listenToRoom() {
         if (room.status === 'waiting') {
             updateWaitingScreen(room);
         } else if (room.status === 'playing' && room.game) {
+            const prevGameState = gameState;
             gameState = room.game;
             showGameScreen();
             updateGameUI();
+            
+            // VERIFICAR NIVEL COMPLETO SOLO CUANDO FIREBASE ACTUALIZA
+            if (gameState.hands && !checkingLevel) {
+                checkLevelCompleteAuto(prevGameState);
+            }
         }
     });
 }
@@ -213,7 +219,7 @@ function updateWaitingScreen(room) {
     startBtn.disabled = !(currentPlayer === room.host && players.length >= 2);
 }
 
-// Iniciar partida desde sala de espera
+// Iniciar partida
 async function startGameFromWaiting() {
     try {
         const roomRef = ref(database, `rooms/${currentRoomId}`);
@@ -224,7 +230,6 @@ async function startGameFromWaiting() {
         const deck = generateDeck();
         const hands = {};
         
-        // Repartir 1 carta a cada jugador (nivel 1)
         players.forEach(player => {
             hands[player] = [deck.pop()];
         });
@@ -246,12 +251,11 @@ async function startGameFromWaiting() {
             }
         });
     } catch (error) {
-        console.error('Error al iniciar partida:', error);
-        alert('Error al iniciar: ' + error.message);
+        console.error('Error al iniciar:', error);
     }
 }
 
-// Generar mazo de 100 cartas
+// Generar mazo
 function generateDeck() {
     const deck = [];
     for (let i = 1; i <= 100; i++) {
@@ -260,7 +264,7 @@ function generateDeck() {
     return shuffleArray(deck);
 }
 
-// Mezclar array
+// Mezclar
 function shuffleArray(array) {
     const newArray = [...array];
     for (let i = newArray.length - 1; i > 0; i--) {
@@ -276,27 +280,15 @@ function showGameScreen() {
     document.getElementById('gameScreen').classList.remove('hidden');
 }
 
-// Actualizar UI del juego
+// Actualizar UI
 function updateGameUI() {
     try {
-        if (!gameState) return;
+        if (!gameState || !gameState.hands) return;
         
-        // VALIDACIÓN CRÍTICA: Verificar que hands existe
-        if (!gameState.hands || typeof gameState.hands !== 'object') {
-            console.warn('gameState.hands no está disponible aún');
-            return;
-        }
-        
-        // Actualizar vidas
         document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
-        
-        // Actualizar nivel
         document.getElementById('levelDisplay').textContent = gameState.level || 1;
-        
-        // Actualizar estrellas
         document.getElementById('starsDisplay').innerHTML = '⭐'.repeat(gameState.stars || 0);
         
-        // Actualizar pila central
         const centralPile = document.getElementById('centralPile');
         if (!gameState.centralPile || gameState.centralPile.length === 0) {
             centralPile.innerHTML = '<p class="text-6xl opacity-30">---</p><p class="text-sm mt-4 opacity-60">Esperando primera carta...</p>';
@@ -305,7 +297,6 @@ function updateGameUI() {
             centralPile.innerHTML = `<div class="text-8xl font-bold">${lastCard}</div>`;
         }
         
-        // Mostrar todas las cartas jugadas
         const cardsPlayedList = document.getElementById('cardsPlayedList');
         if (gameState.centralPile && gameState.centralPile.length > 0) {
             cardsPlayedList.innerHTML = gameState.centralPile.map(card => 
@@ -315,7 +306,6 @@ function updateGameUI() {
             cardsPlayedList.innerHTML = '';
         }
         
-        // Actualizar mano del jugador
         const myHand = gameState.hands[currentPlayer] || [];
         const handDiv = document.getElementById('playerHand');
         
@@ -330,33 +320,28 @@ function updateGameUI() {
             ).join('');
         }
         
-        // Control de estrella
         updateStarControl();
         
-        // Verificar game over
         if (gameState.gameOver) {
             showGameOver();
         }
     } catch (error) {
-        console.error('Error en updateGameUI:', error);
+        console.error('Error en UI:', error);
     }
 }
 
-// Jugar una carta
+// Jugar carta
 async function playCard(cardValue) {
     try {
         if (!gameState || !gameState.hands) return;
         
         let myHand = gameState.hands[currentPlayer];
-        
-        // Asegurar que myHand sea un array
         if (!Array.isArray(myHand)) {
             myHand = myHand ? [myHand] : [];
         }
         
         if (!myHand.includes(cardValue)) return;
         
-        // Verificar si la carta es correcta
         const centralPile = gameState.centralPile || [];
         if (centralPile.length > 0) {
             const lastCard = centralPile[centralPile.length - 1];
@@ -366,29 +351,45 @@ async function playCard(cardValue) {
             }
         }
         
-        // Jugar la carta
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
         
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         await update(gameRef, {
-            [`hands/${currentPlayer}`]: newHand.length > 0 ? newHand : [],
+            [`hands/${currentPlayer}`]: newHand,
             centralPile: newPile
         });
-        
-        // Verificar si todos terminaron sus cartas (con delay)
-        setTimeout(() => checkLevelComplete(), 1000);
     } catch (error) {
-        console.error('Error en playCard:', error);
+        console.error('Error al jugar carta:', error);
     }
 }
 
-// Manejar error (carta jugada fuera de orden)
+// Verificar nivel completo AUTOMÁTICAMENTE cuando Firebase actualiza
+async function checkLevelCompleteAuto(prevState) {
+    try {
+        if (!gameState || !gameState.hands || checkingLevel) return;
+        
+        const allHandsEmpty = Object.values(gameState.hands).every(hand => {
+            if (!hand) return true;
+            if (Array.isArray(hand)) return hand.length === 0;
+            return false;
+        });
+        
+        if (allHandsEmpty && !gameState.gameOver) {
+            checkingLevel = true;
+            await advanceLevel();
+            checkingLevel = false;
+        }
+    } catch (error) {
+        console.error('Error verificando nivel:', error);
+        checkingLevel = false;
+    }
+}
+
+// Manejar error
 async function handleError(wrongCard) {
     try {
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
-        
-        // Perder una vida
         const newLives = gameState.lives - 1;
         
         if (newLives <= 0) {
@@ -400,7 +401,6 @@ async function handleError(wrongCard) {
             return;
         }
         
-        // Descartar cartas menores o iguales que la última jugada correcta
         const lastCorrectCard = gameState.centralPile.length > 0 ? 
             gameState.centralPile[gameState.centralPile.length - 1] : 0;
         
@@ -412,47 +412,17 @@ async function handleError(wrongCard) {
                 playerHand = playerHand ? [playerHand] : [];
             }
             const newHand = playerHand.filter(c => c > Math.max(lastCorrectCard, wrongCard));
-            updates[`hands/${player}`] = newHand.length > 0 ? newHand : [];
+            updates[`hands/${player}`] = newHand;
         });
         
         await update(gameRef, updates);
-        alert(`❌ Error! Perdieron una vida. Cartas menores descartadas.`);
+        alert(`❌ Error! Perdieron una vida.`);
     } catch (error) {
-        console.error('Error en handleError:', error);
+        console.error('Error manejando error:', error);
     }
 }
 
-// Verificar si se completó el nivel
-async function checkLevelComplete() {
-    try {
-        // Refrescar gameState desde Firebase
-        const roomRef = ref(database, `rooms/${currentRoomId}`);
-        const snapshot = await get(roomRef);
-        const room = snapshot.val();
-        
-        if (!room || !room.game || !room.game.hands) {
-            console.warn('No hay datos del juego disponibles');
-            return;
-        }
-        
-        const currentGameState = room.game;
-        
-        // Verificar si todas las manos están vacías
-        const allHandsEmpty = Object.values(currentGameState.hands).every(hand => {
-            if (!hand) return true;
-            if (Array.isArray(hand)) return hand.length === 0;
-            return false;
-        });
-        
-        if (allHandsEmpty) {
-            await advanceLevel();
-        }
-    } catch (error) {
-        console.error('Error en checkLevelComplete:', error);
-    }
-}
-
-// Avanzar al siguiente nivel
+// Avanzar nivel
 async function advanceLevel() {
     try {
         const nextLevel = gameState.level + 1;
@@ -466,7 +436,6 @@ async function advanceLevel() {
             return;
         }
         
-        // Aplicar recompensa del nivel actual
         let newLives = gameState.lives;
         let newStars = gameState.stars;
         
@@ -474,7 +443,6 @@ async function advanceLevel() {
         if (reward === 'life' && newLives < 5) newLives++;
         if (reward === 'star' && newStars < 3) newStars++;
         
-        // Repartir cartas para el nuevo nivel
         const deck = generateDeck();
         const hands = {};
         const players = Object.keys(gameState.hands);
@@ -499,13 +467,13 @@ async function advanceLevel() {
             starVotes: {}
         });
         
-        alert(`✅ ¡Nivel ${gameState.level} completado! Avanzando al nivel ${nextLevel}...`);
+        alert(`✅ ¡Nivel ${gameState.level} completado!`);
     } catch (error) {
-        console.error('Error en advanceLevel:', error);
+        console.error('Error avanzando nivel:', error);
     }
 }
 
-// Proponer usar estrella
+// Proponer estrella
 async function proposeStar() {
     if (!gameState || gameState.stars <= 0) return;
     
@@ -516,15 +484,14 @@ async function proposeStar() {
     });
 }
 
-// Votar SÍ a la estrella
+// Votar SÍ
 async function voteStarYes() {
     const gameRef = ref(database, `rooms/${currentRoomId}/game/starVotes/${currentPlayer}`);
     await set(gameRef, true);
-    
     setTimeout(() => checkStarVotes(), 300);
 }
 
-// Votar NO a la estrella
+// Votar NO
 async function voteStarNo() {
     const gameRef = ref(database, `rooms/${currentRoomId}/game`);
     await update(gameRef, {
@@ -533,7 +500,7 @@ async function voteStarNo() {
     });
 }
 
-// Verificar votos de estrella
+// Verificar votos
 async function checkStarVotes() {
     if (!gameState || !gameState.starProposal || !gameState.hands) return;
     
@@ -545,7 +512,7 @@ async function checkStarVotes() {
     }
 }
 
-// Usar estrella ninja
+// Usar estrella
 async function useStar() {
     try {
         const updates = {
@@ -554,7 +521,6 @@ async function useStar() {
             starVotes: {}
         };
         
-        // Cada jugador descarta su carta más baja
         Object.keys(gameState.hands).forEach(player => {
             let hand = gameState.hands[player];
             if (!Array.isArray(hand)) {
@@ -569,11 +535,11 @@ async function useStar() {
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         await update(gameRef, updates);
     } catch (error) {
-        console.error('Error en useStar:', error);
+        console.error('Error usando estrella:', error);
     }
 }
 
-// Actualizar control de estrella
+// Actualizar control estrella
 function updateStarControl() {
     if (!gameState) return;
     
@@ -587,7 +553,7 @@ function updateStarControl() {
     if (gameState.starProposal) {
         proposeBtn.classList.add('hidden');
         starVotes.classList.remove('hidden');
-        starMessage.textContent = `${gameState.starProposal} propone usar una estrella. ¿Todos de acuerdo?`;
+        starMessage.textContent = `${gameState.starProposal} propone usar una estrella`;
         
         if (gameState.hands) {
             const players = Object.keys(gameState.hands);
@@ -597,12 +563,12 @@ function updateStarControl() {
     } else {
         proposeBtn.classList.remove('hidden');
         starVotes.classList.add('hidden');
-        starMessage.textContent = '¿Usar estrella ninja? Todos deben estar de acuerdo';
+        starMessage.textContent = '¿Usar estrella ninja?';
         starVoteStatus.textContent = '';
     }
 }
 
-// Salir de la sala
+// Salir
 async function leaveRoom() {
     if (currentRoomId && currentPlayer) {
         const playerRef = ref(database, `rooms/${currentRoomId}/players/${currentPlayer}`);
@@ -611,7 +577,7 @@ async function leaveRoom() {
     location.reload();
 }
 
-// Mostrar game over
+// Game over
 function showGameOver() {
     const modal = document.getElementById('gameOverModal');
     const title = document.getElementById('gameOverTitle');
@@ -622,13 +588,12 @@ function showGameOver() {
     if (gameState.victory) {
         title.textContent = '🎉 ¡VICTORIA!';
         title.className = 'text-5xl font-bold mb-4 text-green-400';
-        message.textContent = `¡Completaron todos los ${gameState.maxLevels} niveles!`;
+        message.textContent = `¡Completaron los ${gameState.maxLevels} niveles!`;
     } else {
         title.textContent = '💔 GAME OVER';
         title.className = 'text-5xl font-bold mb-4 text-red-400';
-        message.textContent = `Llegaron al nivel ${gameState.level}. ¡Inténtenlo de nuevo!`;
+        message.textContent = `Llegaron al nivel ${gameState.level}`;
     }
 }
 
-// Iniciar escuchando salas
 listenToRooms();
