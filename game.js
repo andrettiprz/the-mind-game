@@ -348,7 +348,7 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // VERIFICAR NIVEL COMPLETO CON REINTENTO
+        // VERIFICAR NIVEL COMPLETO CON DELAY
         setTimeout(async () => {
             await checkLevelCompleteWithRetry();
         }, 2500);
@@ -360,7 +360,7 @@ async function playCard(cardValue) {
 }
 
 async function checkLevelCompleteWithRetry(attempt = 1) {
-    const MAX_ATTEMPTS = 3;
+    const MAX_ATTEMPTS = 5;
     
     console.log(`\n--- Verificando nivel completo (intento ${attempt}/${MAX_ATTEMPTS}) ---`);
     
@@ -380,39 +380,24 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
             return;
         }
         
-        if (!checkGame.hands) {
-            console.warn('⚠️ hands no disponible, reintentando...');
-            if (attempt < MAX_ATTEMPTS) {
-                setTimeout(() => checkLevelCompleteWithRetry(attempt + 1), 1000);
-            } else {
-                console.error('❌ No se pudo verificar después de 3 intentos');
-            }
-            return;
+        // El número de jugadores que aún tienen cartas
+        const playersWithCards = checkGame.hands ? Object.keys(checkGame.hands) : [];
+        
+        let hasRemainingCards = false;
+
+        if (playersWithCards.length > 0) {
+            hasRemainingCards = playersWithCards.some(player => {
+                const handArray = ensureArray(checkGame.hands[player]);
+                console.log(`  ${player}: ${handArray.length} cartas`);
+                return handArray.length > 0;
+            });
         }
         
-        // OBTENER LA LISTA DE JUGADORES DE LA SALA, NO DE HANDS
-        const totalPlayers = Object.keys(checkRoom.players).length;
-        const playersWithCards = Object.keys(checkGame.hands);
+        // NIVEL COMPLETO SI: No hay jugadores con cartas O todas las manos visibles están vacías
+        const levelComplete = (playersWithCards.length === 0) || (playersWithCards.length > 0 && !hasRemainingCards);
         
-        console.log(`Total jugadores: ${totalPlayers}`);
-        console.log(`Jugadores con cartas en hands: ${playersWithCards.length}`);
-        console.log('Manos actuales:', checkGame.hands);
-        
-        // Verificar que TODAS las manos estén vacías
-        const allEmpty = playersWithCards.every(player => {
-            const handArray = ensureArray(checkGame.hands[player]);
-            console.log(`  ${player}: ${handArray.length} cartas`);
-            return handArray.length === 0;
-        });
-        
-        // SI HAY MENOS JUGADORES EN HANDS QUE EN LA SALA, SIGNIFICA QUE ALGUNOS YA TIENEN MANO VACÍA
-        const missingPlayers = totalPlayers - playersWithCards.length;
-        console.log(`Jugadores con mano vacía (no en hands): ${missingPlayers}`);
-        console.log(`¿Todas las manos visibles vacías? ${allEmpty}`);
-        
-        // NIVEL COMPLETO SI: todas las manos visibles están vacías Y faltan jugadores (manos vacías borradas)
-        const levelComplete = allEmpty || (playersWithCards.length === 0 && totalPlayers > 0);
-        
+        console.log(`Manos restantes visibles: ${playersWithCards.length}`);
+        console.log(`¿Hay cartas restantes? ${hasRemainingCards}`);
         console.log(`¿Nivel completo? ${levelComplete}`);
         
         if (levelComplete && !isAdvancing) {
@@ -420,14 +405,17 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
             await advanceLevel();
         } else if (isAdvancing) {
             console.log('⚠️ Ya se está avanzando de nivel');
+        } else if (!levelComplete && attempt < MAX_ATTEMPTS) {
+            console.log('⏳ Nivel incompleto, reintentando...');
+            setTimeout(() => checkLevelCompleteWithRetry(attempt + 1), 1000);
+        } else if (attempt >= MAX_ATTEMPTS) {
+            console.log('⚠️ Máximo de intentos alcanzado, nivel incompleto');
         }
+        
     } catch (error) {
         console.error('ERROR verificando nivel:', error);
     }
 }
-
-
-
 
 async function handleError(wrongCard, freshGame) {
     try {
@@ -481,7 +469,7 @@ async function advanceLevel() {
     isAdvancing = true;
     
     try {
-        console.log('\n=== AVANZANDO DE NIVEL ===');
+        console.log('\n=== AVANZANDO DE NIVEL (Doble Update) ===');
         
         const roomRef = ref(database, `rooms/${currentRoomId}`);
         const snapshot = await get(roomRef);
@@ -543,9 +531,8 @@ async function advanceLevel() {
         
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         
-        console.log('Actualizando Firebase...');
-        
-        // ACTUALIZACIÓN POR PARTES: Primero el deck y estado, LUEGO las hands
+        // 1. PRIMER UPDATE: Vaciar hands temporalmente
+        console.log('1. Actualizando estado (sin hands)...');
         await update(gameRef, {
             level: nextLevel,
             lives: newLives,
@@ -554,13 +541,12 @@ async function advanceLevel() {
             centralPile: [],
             discardedCards: [],
             starProposal: null,
-            starVotes: {}
+            starVotes: {},
+            hands: null
         });
         
-        // PEQUEÑO DELAY
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // LUEGO actualizar las manos
+        // 2. SEGUNDO UPDATE: Repartir manos nuevas
+        console.log('2. Repartiendo manos nuevas...');
         await update(gameRef, {
             hands: hands
         });
@@ -582,7 +568,6 @@ async function advanceLevel() {
         isAdvancing = false;
     }
 }
-
 
 async function proposeStar() {
     if (!gameState || gameState.stars <= 0) return;
