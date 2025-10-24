@@ -239,8 +239,14 @@ function showGameScreen() {
 
 function updateGameUI() {
     try {
-        if (!gameState || !gameState.hands) {
-            console.warn('updateGameUI: No hay gameState o hands');
+        // CHEQUEO CRÍTICO: Verificar que gameState Y hands existen
+        if (!gameState) {
+            console.warn('updateGameUI: No hay gameState');
+            return;
+        }
+        
+        if (!gameState.hands) {
+            console.warn('updateGameUI: gameState.hands es undefined, esperando actualización...');
             return;
         }
         
@@ -289,6 +295,7 @@ function updateGameUI() {
         console.error('ERROR en updateGameUI:', error);
     }
 }
+
 
 async function playCard(cardValue) {
     try {
