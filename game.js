@@ -177,7 +177,6 @@ function showWaitingScreen() {
 }
 
 // Escuchar cambios en la sala
-// Escuchar cambios en la sala
 function listenToRoom() {
     const roomRef = ref(database, `rooms/${currentRoomId}`);
     
@@ -190,19 +189,15 @@ function listenToRoom() {
             return;
         }
         
-        console.log('Estado de la sala:', room.status);
-        
         if (room.status === 'waiting') {
             updateWaitingScreen(room);
         } else if (room.status === 'playing') {
-            console.log('Juego iniciado, datos:', room.game);
             gameState = room.game;
             showGameScreen();
             updateGameUI();
         }
     });
 }
-
 
 // Actualizar pantalla de espera
 function updateWaitingScreen(room) {
@@ -219,15 +214,11 @@ function updateWaitingScreen(room) {
 }
 
 // Iniciar partida desde sala de espera
-// Iniciar partida desde sala de espera
 async function startGameFromWaiting() {
     try {
-        console.log('Iniciando partida...');
         const roomRef = ref(database, `rooms/${currentRoomId}`);
         const snapshot = await get(roomRef);
         const room = snapshot.val();
-        
-        console.log('Datos de la sala:', room);
         
         const players = Object.keys(room.players);
         const deck = generateDeck();
@@ -235,14 +226,8 @@ async function startGameFromWaiting() {
         
         // Repartir 1 carta a cada jugador (nivel 1)
         players.forEach(player => {
-            // IMPORTANTE: Siempre usar arrays, incluso para una carta
-            const hand = [deck.pop()];
-            hands[player] = hand;
-            console.log(`Carta para ${player}:`, hand);
+            hands[player] = [deck.pop()];
         });
-        
-        console.log('Manos finales:', hands);
-        console.log('Actualizando sala...');
         
         await update(roomRef, {
             status: 'playing',
@@ -260,15 +245,11 @@ async function startGameFromWaiting() {
                 victory: false
             }
         });
-        
-        console.log('Partida iniciada correctamente!');
     } catch (error) {
         console.error('Error al iniciar partida:', error);
         alert('Error al iniciar: ' + error.message);
     }
 }
-
-
 
 // Generar mazo de 100 cartas
 function generateDeck() {
@@ -296,20 +277,15 @@ function showGameScreen() {
 }
 
 // Actualizar UI del juego
-// Actualizar UI del juego
-// Actualizar UI del juego
 function updateGameUI() {
-    if (!gameState) {
-        console.log('No hay gameState todavía');
+    if (!gameState || !gameState.hands) {
         return;
     }
-    
-    console.log('Actualizando UI con mano:', gameState.hands[currentPlayer]);
     
     // Actualizar vidas
     document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
     
-    // Actualizar nivel  
+    // Actualizar nivel
     document.getElementById('levelDisplay').textContent = gameState.level || 1;
     
     // Actualizar estrellas
@@ -335,15 +311,14 @@ function updateGameUI() {
     }
     
     // Actualizar mano del jugador
-    const myHand = gameState.hands && gameState.hands[currentPlayer] ? gameState.hands[currentPlayer] : [];
+    const myHand = gameState.hands[currentPlayer] || [];
     const handDiv = document.getElementById('playerHand');
-    
-    console.log('Mi mano:', myHand);
     
     if (myHand.length === 0) {
         handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
     } else {
-        handDiv.innerHTML = myHand.sort((a, b) => a - b).map(card => 
+        const sortedHand = Array.isArray(myHand) ? [...myHand].sort((a, b) => a - b) : [myHand];
+        handDiv.innerHTML = sortedHand.map(card => 
             `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
                 ${card}
             </button>`
@@ -359,40 +334,24 @@ function updateGameUI() {
     }
 }
 
-
-
-// Jugar una carta
 // Jugar una carta
 async function playCard(cardValue) {
-    if (!gameState) {
-        console.log('No hay gameState');
-        return;
+    if (!gameState || !gameState.hands) return;
+    
+    let myHand = gameState.hands[currentPlayer];
+    
+    // Asegurar que myHand sea un array
+    if (!Array.isArray(myHand)) {
+        myHand = myHand ? [myHand] : [];
     }
     
-    console.log('Intentando jugar carta:', cardValue);
-    console.log('Estado del juego:', gameState);
+    if (!myHand.includes(cardValue)) return;
     
-    const myHand = gameState.hands[currentPlayer];
-    
-    // VALIDACIÓN: Asegurarse de que myHand es un array
-    if (!myHand || !Array.isArray(myHand)) {
-        console.error('Error: la mano no es un array válido', myHand);
-        alert('Error: tu mano no está correctamente inicializada');
-        return;
-    }
-    
-    if (!myHand.includes(cardValue)) {
-        console.log('No tienes esa carta');
-        return;
-    }
-    
-    // Verificar si la carta es correcta (en The Mind solo importa que sea mayor)
+    // Verificar si la carta es correcta
     const centralPile = gameState.centralPile || [];
     if (centralPile.length > 0) {
         const lastCard = centralPile[centralPile.length - 1];
         if (cardValue < lastCard) {
-            // ERROR: carta menor que la última jugada
-            console.log(`Error: ${cardValue} es menor que ${lastCard}`);
             await handleError(cardValue);
             return;
         }
@@ -402,19 +361,15 @@ async function playCard(cardValue) {
     const newHand = myHand.filter(c => c !== cardValue);
     const newPile = [...centralPile, cardValue];
     
-    console.log('Nueva mano:', newHand);
-    console.log('Nueva pila:', newPile);
-    
     const gameRef = ref(database, `rooms/${currentRoomId}/game`);
     await update(gameRef, {
-        [`hands/${currentPlayer}`]: newHand,
+        [`hands/${currentPlayer}`]: newHand.length > 0 ? newHand : [],
         centralPile: newPile
     });
     
     // Verificar si todos terminaron sus cartas
-    await checkLevelComplete();
+    setTimeout(() => checkLevelComplete(), 500);
 }
-
 
 // Manejar error (carta jugada fuera de orden)
 async function handleError(wrongCard) {
@@ -424,7 +379,6 @@ async function handleError(wrongCard) {
     const newLives = gameState.lives - 1;
     
     if (newLives <= 0) {
-        // Game over
         await update(gameRef, {
             lives: 0,
             gameOver: true,
@@ -433,23 +387,40 @@ async function handleError(wrongCard) {
         return;
     }
     
-    // Descartar cartas menores que la jugada
-    const lastCorrectCard = gameState.centralPile[gameState.centralPile.length - 1] || 0;
+    // Descartar cartas menores o iguales que la última jugada correcta
+    const lastCorrectCard = gameState.centralPile.length > 0 ? 
+        gameState.centralPile[gameState.centralPile.length - 1] : 0;
+    
     const updates = { lives: newLives };
     
     Object.keys(gameState.hands).forEach(player => {
-        const newHand = gameState.hands[player].filter(c => c > lastCorrectCard);
-        updates[`hands/${player}`] = newHand;
+        let playerHand = gameState.hands[player];
+        if (!Array.isArray(playerHand)) {
+            playerHand = playerHand ? [playerHand] : [];
+        }
+        const newHand = playerHand.filter(c => c > Math.max(lastCorrectCard, wrongCard));
+        updates[`hands/${player}`] = newHand.length > 0 ? newHand : [];
     });
     
     await update(gameRef, updates);
-    
-    alert(`❌ Error! Carta ${wrongCard} jugada incorrectamente. -1 vida`);
+    alert(`❌ Error! Perdieron una vida. Cartas menores descartadas.`);
 }
 
 // Verificar si se completó el nivel
 async function checkLevelComplete() {
-    const allHandsEmpty = Object.values(gameState.hands).every(hand => hand.length === 0);
+    // Refrescar gameState
+    const roomRef = ref(database, `rooms/${currentRoomId}`);
+    const snapshot = await get(roomRef);
+    const room = snapshot.val();
+    
+    if (!room || !room.game) return;
+    
+    const currentGameState = room.game;
+    const allHandsEmpty = Object.values(currentGameState.hands).every(hand => {
+        if (!hand) return true;
+        if (Array.isArray(hand)) return hand.length === 0;
+        return false;
+    });
     
     if (allHandsEmpty) {
         await advanceLevel();
@@ -461,7 +432,6 @@ async function advanceLevel() {
     const nextLevel = gameState.level + 1;
     
     if (nextLevel > gameState.maxLevels) {
-        // Victoria!
         const gameRef = ref(database, `rooms/${currentRoomId}/game`);
         await update(gameRef, {
             gameOver: true,
@@ -484,10 +454,11 @@ async function advanceLevel() {
     const players = Object.keys(gameState.hands);
     
     players.forEach(player => {
-        hands[player] = [];
+        const hand = [];
         for (let i = 0; i < nextLevel; i++) {
-            hands[player].push(deck.pop());
+            hand.push(deck.pop());
         }
+        hands[player] = hand;
     });
     
     const gameRef = ref(database, `rooms/${currentRoomId}/game`);
@@ -521,7 +492,7 @@ async function voteStarYes() {
     const gameRef = ref(database, `rooms/${currentRoomId}/game/starVotes/${currentPlayer}`);
     await set(gameRef, true);
     
-    checkStarVotes();
+    setTimeout(() => checkStarVotes(), 300);
 }
 
 // Votar NO a la estrella
@@ -541,7 +512,6 @@ async function checkStarVotes() {
     const votes = Object.keys(gameState.starVotes || {});
     
     if (votes.length === players.length && votes.every(p => gameState.starVotes[p])) {
-        // Todos votaron SÍ, usar estrella
         await useStar();
     }
 }
@@ -556,7 +526,10 @@ async function useStar() {
     
     // Cada jugador descarta su carta más baja
     Object.keys(gameState.hands).forEach(player => {
-        const hand = gameState.hands[player];
+        let hand = gameState.hands[player];
+        if (!Array.isArray(hand)) {
+            hand = hand ? [hand] : [];
+        }
         if (hand.length > 0) {
             const sorted = [...hand].sort((a, b) => a - b);
             updates[`hands/${player}`] = sorted.slice(1);
