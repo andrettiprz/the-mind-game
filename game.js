@@ -177,6 +177,7 @@ function showWaitingScreen() {
 }
 
 // Escuchar cambios en la sala
+// Escuchar cambios en la sala
 function listenToRoom() {
     const roomRef = ref(database, `rooms/${currentRoomId}`);
     
@@ -189,15 +190,19 @@ function listenToRoom() {
             return;
         }
         
+        console.log('Estado de la sala:', room.status);
+        
         if (room.status === 'waiting') {
             updateWaitingScreen(room);
         } else if (room.status === 'playing') {
+            console.log('Juego iniciado, datos:', room.game);
             gameState = room.game;
             showGameScreen();
             updateGameUI();
         }
     });
 }
+
 
 // Actualizar pantalla de espera
 function updateWaitingScreen(room) {
@@ -215,36 +220,49 @@ function updateWaitingScreen(room) {
 
 // Iniciar partida desde sala de espera
 async function startGameFromWaiting() {
-    const roomRef = ref(database, `rooms/${currentRoomId}`);
-    const snapshot = await get(roomRef);
-    const room = snapshot.val();
-    
-    const players = Object.keys(room.players);
-    const deck = generateDeck();
-    const hands = {};
-    
-    // Repartir 1 carta a cada jugador (nivel 1)
-    players.forEach(player => {
-        hands[player] = [deck.pop()];
-    });
-    
-    await update(roomRef, {
-        status: 'playing',
-        game: {
-            level: 1,
-            lives: room.config.lives,
-            stars: room.config.stars,
-            maxLevels: room.config.levels,
-            deck: deck,
-            hands: hands,
-            centralPile: [],
-            starProposal: null,
-            starVotes: {},
-            gameOver: false,
-            victory: false
-        }
-    });
+    try {
+        console.log('Iniciando partida...');
+        const roomRef = ref(database, `rooms/${currentRoomId}`);
+        const snapshot = await get(roomRef);
+        const room = snapshot.val();
+        
+        console.log('Datos de la sala:', room);
+        
+        const players = Object.keys(room.players);
+        const deck = generateDeck();
+        const hands = {};
+        
+        // Repartir 1 carta a cada jugador (nivel 1)
+        players.forEach(player => {
+            hands[player] = [deck.pop()];
+            console.log(`Carta para ${player}:`, hands[player]);
+        });
+        
+        console.log('Actualizando sala...');
+        await update(roomRef, {
+            status: 'playing',
+            game: {
+                level: 1,
+                lives: room.config.lives,
+                stars: room.config.stars,
+                maxLevels: room.config.levels,
+                deck: deck,
+                hands: hands,
+                centralPile: [],
+                starProposal: null,
+                starVotes: {},
+                gameOver: false,
+                victory: false
+            }
+        });
+        
+        console.log('Partida iniciada correctamente!');
+    } catch (error) {
+        console.error('Error al iniciar partida:', error);
+        alert('Error al iniciar: ' + error.message);
+    }
 }
+
 
 // Generar mazo de 100 cartas
 function generateDeck() {
@@ -272,21 +290,31 @@ function showGameScreen() {
 }
 
 // Actualizar UI del juego
+// Actualizar UI del juego
 function updateGameUI() {
-    if (!gameState) return;
+    if (!gameState) {
+        console.log('No hay gameState todavía');
+        return;
+    }
+    
+    // Verificar que el juego esté iniciado
+    if (!gameState.hands || !gameState.centralPile) {
+        console.log('El juego no está completamente iniciado');
+        return;
+    }
     
     // Actualizar vidas
-    document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives);
+    document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
     
     // Actualizar nivel
-    document.getElementById('levelDisplay').textContent = gameState.level;
+    document.getElementById('levelDisplay').textContent = gameState.level || 1;
     
     // Actualizar estrellas
-    document.getElementById('starsDisplay').innerHTML = '⭐'.repeat(gameState.stars);
+    document.getElementById('starsDisplay').innerHTML = '⭐'.repeat(gameState.stars || 0);
     
     // Actualizar pila central
     const centralPile = document.getElementById('centralPile');
-    if (gameState.centralPile.length === 0) {
+    if (!gameState.centralPile || gameState.centralPile.length === 0) {
         centralPile.innerHTML = '<p class="text-6xl opacity-30">---</p><p class="text-sm mt-4 opacity-60">Esperando primera carta...</p>';
     } else {
         const lastCard = gameState.centralPile[gameState.centralPile.length - 1];
@@ -295,18 +323,27 @@ function updateGameUI() {
     
     // Mostrar todas las cartas jugadas
     const cardsPlayedList = document.getElementById('cardsPlayedList');
-    cardsPlayedList.innerHTML = gameState.centralPile.map(card => 
-        `<div class="bg-white/20 px-3 py-1 rounded text-sm">${card}</div>`
-    ).join('');
+    if (gameState.centralPile && gameState.centralPile.length > 0) {
+        cardsPlayedList.innerHTML = gameState.centralPile.map(card => 
+            `<div class="bg-white/20 px-3 py-1 rounded text-sm">${card}</div>`
+        ).join('');
+    } else {
+        cardsPlayedList.innerHTML = '';
+    }
     
     // Actualizar mano del jugador
     const myHand = gameState.hands[currentPlayer] || [];
     const handDiv = document.getElementById('playerHand');
-    handDiv.innerHTML = myHand.sort((a, b) => a - b).map(card => 
-        `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
-            ${card}
-        </button>`
-    ).join('');
+    
+    if (myHand.length === 0) {
+        handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
+    } else {
+        handDiv.innerHTML = myHand.sort((a, b) => a - b).map(card => 
+            `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
+                ${card}
+            </button>`
+        ).join('');
+    }
     
     // Control de estrella
     updateStarControl();
@@ -316,6 +353,7 @@ function updateGameUI() {
         showGameOver();
     }
 }
+
 
 // Jugar una carta
 async function playCard(cardValue) {
