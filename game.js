@@ -1282,76 +1282,76 @@ async function useStar() {
  * Updates UI for star proposal/voting, fetching player count asynchronously.
  * This function is NOT async to avoid blocking updateGameUI.
  */
+/**
+ * Updates UI for star proposal/voting based ONLY on local gameState.
+ * This version is NOT async to simplify logic and avoid potential timing issues.
+ */
 function updateStarControl() {
-    // Check if game screen elements are present
+    // Get references to UI elements
     const proposeBtn = document.getElementById('proposeStarBtn');
-    if (!proposeBtn) return; // Exit if not on game screen
-
     const starVotesEl = document.getElementById('starVotes');
     const starMessage = document.getElementById('starMessage');
     const starVoteStatus = document.getElementById('starVoteStatus');
 
-    if (!starVotesEl || !starMessage || !starVoteStatus) {
-         console.warn("updateStarControl: Elementos UI no encontrados.");
-         return;
+    // Exit if elements are not found (e.g., user is not on the game screen)
+    if (!proposeBtn || !starVotesEl || !starMessage || !starVoteStatus) {
+        // console.log("updateStarControl: Elementos UI de estrella no encontrados."); // Optional log
+        return;
     }
-     // Ensure gameState exists
-     if (!gameState || !currentRoomId) {
-         // Hide star controls if no game state
-         proposeBtn.classList.add('hidden');
-         starVotesEl.classList.add('hidden');
-         starMessage.textContent = '';
-         starVoteStatus.textContent = '';
-         return;
-     }
 
-    // Disable proposal based on local state
-    proposeBtn.disabled = gameState.stars <= 0 || gameState.starProposal !== null;
-
-    if (gameState.starProposal) {
+    // Ensure gameState is available before proceeding
+    if (!gameState) {
+        console.warn("updateStarControl: gameState es nulo. Ocultando controles de estrella.");
         proposeBtn.classList.add('hidden');
-        starVotesEl.classList.remove('hidden');
-        starMessage.textContent = `${escapeHtml(gameState.starProposal)} propone usar estrella`;
+        starVotesEl.classList.add('hidden');
+        proposeBtn.disabled = true; // Ensure it's disabled if no game state
+        starMessage.textContent = '';
+        starVoteStatus.textContent = '';
+        return;
+    }
 
-        const votes = gameState.starVotes || {};
+    // Determine conditions based on current gameState
+    const hasStars = gameState.stars > 0;
+    const proposalActive = gameState.starProposal !== null;
+
+    // Log the conditions for easier debugging
+    console.log(`updateStarControl: Has Stars=${hasStars}, Proposal Active=${proposalActive} (Proposer: ${gameState.starProposal}, Stars: ${gameState.stars})`);
+
+    // --- Logic for Propose Button ---
+    // Disable the button if the player has no stars OR if a proposal is already active
+    proposeBtn.disabled = !hasStars || proposalActive;
+
+    if (proposalActive) {
+        // --- A proposal IS active ---
+        proposeBtn.classList.add('hidden'); // Hide the propose button
+        starVotesEl.classList.remove('hidden'); // Show the Yes/No vote buttons
+        starMessage.textContent = `${escapeHtml(gameState.starProposal)} propone usar estrella`; // Show who proposed
+
+        // Update vote status text
+        const votes = gameState.starVotes || {}; // Default to empty object if null/undefined
         const voteCount = Object.keys(votes).length;
-        // Estimate player count initially
-        let playerCountEstimate = 2; // Default estimate
-        if (previousGameState?.players) playerCountEstimate = Object.keys(previousGameState.players).length;
-        if (gameState?.hands) playerCountEstimate = Math.max(playerCountEstimate, Object.keys(gameState.hands).length);
 
-        starVoteStatus.textContent = `Votos: ${voteCount}/${playerCountEstimate}?`; // Show estimate
+        // Estimate player count based on current hands (less reliable but avoids async)
+        // Use a default of 2 if hands is missing
+        const playerCountEstimate = gameState.hands ? Object.keys(gameState.hands).length : 2;
+        starVoteStatus.textContent = `Votos: ${voteCount}/${playerCountEstimate}?`; // Add '?' to indicate it's an estimate
 
-        // Fetch accurate count asynchronously
-        get(ref(database, `rooms/${currentRoomId}/players`)).then(snapshot => {
-            const roomPlayers = snapshot.val();
-            const actualPlayerCount = roomPlayers ? Object.keys(roomPlayers).length : playerCountEstimate;
-            // Check current gameState again, proposal might have changed
-            if (gameState && gameState.starProposal) {
-                 starVoteStatus.textContent = `Votos: ${voteCount}/${actualPlayerCount}`;
-            }
-        }).catch(error => {
-            console.error("Error fetching players for star status:", error);
-            if (gameState && gameState.starProposal) {
-                 starVoteStatus.textContent = `Votos: ${voteCount}/?`;
-            }
-        });
-
-        // Disable buttons if already voted (based on local state)
+        // Disable vote buttons if the current player has already voted
         const yesBtn = starVotesEl.querySelector('button:first-child');
         const noBtn = starVotesEl.querySelector('button:last-child');
         if (yesBtn && noBtn) {
-            const alreadyVoted = votes.hasOwnProperty(currentPlayer); // More reliable check
+            // Check if the currentPlayer key exists in the votes object
+            const alreadyVoted = votes.hasOwnProperty(currentPlayer);
             yesBtn.disabled = alreadyVoted;
-            noBtn.disabled = alreadyVoted;
+            noBtn.disabled = alreadyVoted; // Disable both once voted
         }
 
     } else {
-        // No active proposal
-        proposeBtn.classList.remove('hidden');
-        starVotesEl.classList.add('hidden');
-        starMessage.textContent = '¿Usar estrella ninja?';
-        starVoteStatus.textContent = '';
+        // --- NO proposal is active ---
+        proposeBtn.classList.remove('hidden'); // Show the propose button
+        starVotesEl.classList.add('hidden'); // Hide the Yes/No vote buttons
+        starMessage.textContent = '¿Usar estrella ninja?'; // Reset message
+        starVoteStatus.textContent = ''; // Clear vote status
     }
 }
 
