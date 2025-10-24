@@ -359,7 +359,6 @@ async function playCard(cardValue) {
     }
 }
 
-// NUEVA FUNCIÓN: Verificar nivel completo con reintentos
 async function checkLevelCompleteWithRetry(attempt = 1) {
     const MAX_ATTEMPTS = 3;
     
@@ -381,7 +380,6 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
             return;
         }
         
-        // SI HANDS NO ESTÁ DISPONIBLE, REINTENTAR
         if (!checkGame.hands) {
             console.warn('⚠️ hands no disponible, reintentando...');
             if (attempt < MAX_ATTEMPTS) {
@@ -392,17 +390,32 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
             return;
         }
         
+        // OBTENER LA LISTA DE JUGADORES DE LA SALA, NO DE HANDS
+        const totalPlayers = Object.keys(checkRoom.players).length;
+        const playersWithCards = Object.keys(checkGame.hands);
+        
+        console.log(`Total jugadores: ${totalPlayers}`);
+        console.log(`Jugadores con cartas en hands: ${playersWithCards.length}`);
         console.log('Manos actuales:', checkGame.hands);
         
-        const allEmpty = Object.keys(checkGame.hands).every(player => {
+        // Verificar que TODAS las manos estén vacías
+        const allEmpty = playersWithCards.every(player => {
             const handArray = ensureArray(checkGame.hands[player]);
             console.log(`  ${player}: ${handArray.length} cartas`);
             return handArray.length === 0;
         });
         
-        console.log(`¿Todas vacías? ${allEmpty}`);
+        // SI HAY MENOS JUGADORES EN HANDS QUE EN LA SALA, SIGNIFICA QUE ALGUNOS YA TIENEN MANO VACÍA
+        const missingPlayers = totalPlayers - playersWithCards.length;
+        console.log(`Jugadores con mano vacía (no en hands): ${missingPlayers}`);
+        console.log(`¿Todas las manos visibles vacías? ${allEmpty}`);
         
-        if (allEmpty && !isAdvancing) {
+        // NIVEL COMPLETO SI: todas las manos visibles están vacías Y faltan jugadores (manos vacías borradas)
+        const levelComplete = allEmpty || (playersWithCards.length === 0 && totalPlayers > 0);
+        
+        console.log(`¿Nivel completo? ${levelComplete}`);
+        
+        if (levelComplete && !isAdvancing) {
             console.log('✓ ¡Nivel completo! Avanzando...');
             await advanceLevel();
         } else if (isAdvancing) {
@@ -413,7 +426,6 @@ async function checkLevelCompleteWithRetry(attempt = 1) {
     }
 }
 
-// NUEVA FUNCIÓN: Verificar nivel completo con reintentos
 
 
 
