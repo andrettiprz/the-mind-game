@@ -343,11 +343,11 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // VERIFICAR NIVEL COMPLETO CON DELAY
+        // VERIFICAR NIVEL COMPLETO CON DELAY Y CHEQUEO CRÍTICO
         setTimeout(async () => {
             console.log('\n--- Verificando nivel completo ---');
             try {
-                // CRÍTICO: Leer la SALA completa (más estable)
+                // Leer la SALA completa (más estable)
                 const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}`));
                 const checkRoom = checkSnapshot.val();
 
@@ -360,6 +360,12 @@ async function playCard(cardValue) {
                 
                 if (checkGame.gameOver) {
                     console.log('⚠️ El juego ya terminó');
+                    return;
+                }
+                
+                // ¡CHEQUEO CRÍTICO! Verificar que hands existe
+                if (!checkGame.hands) {
+                    console.error('❌ La clave "hands" no existe en el estado del juego');
                     return;
                 }
                 
@@ -389,6 +395,7 @@ async function playCard(cardValue) {
         alert('Error al jugar carta: ' + error.message);
     }
 }
+
 
 
 async function handleError(wrongCard, freshGame) {
