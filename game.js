@@ -343,17 +343,20 @@ async function playCard(cardValue) {
         
         console.log(`✓ Carta ${cardValue} jugada correctamente`);
         
-        // Verificar nivel completo
+        // VERIFICAR NIVEL COMPLETO CON DELAY
         setTimeout(async () => {
             console.log('\n--- Verificando nivel completo ---');
             try {
-                const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}/game`));
-                const checkGame = checkSnapshot.val();
-                
-                if (!checkGame || !checkGame.hands) {
-                    console.error('❌ No hay juego para verificar');
+                // CRÍTICO: Leer la SALA completa (más estable)
+                const checkSnapshot = await get(ref(database, `rooms/${currentRoomId}`));
+                const checkRoom = checkSnapshot.val();
+
+                if (!checkRoom || checkRoom.status !== 'playing' || !checkRoom.game) {
+                    console.error('❌ Sala o juego no válidos para verificar');
                     return;
                 }
+
+                const checkGame = checkRoom.game;
                 
                 if (checkGame.gameOver) {
                     console.log('⚠️ El juego ya terminó');
@@ -386,6 +389,7 @@ async function playCard(cardValue) {
         alert('Error al jugar carta: ' + error.message);
     }
 }
+
 
 async function handleError(wrongCard, freshGame) {
     try {
@@ -469,6 +473,7 @@ async function advanceLevel() {
             return;
         }
         
+        // Calcular recompensas
         let newLives = currentGame.lives;
         let newStars = currentGame.stars;
         
@@ -482,6 +487,7 @@ async function advanceLevel() {
             console.log(`Recompensa: +1 estrella (${newStars})`);
         }
         
+        // Generar NUEVO MAZO y repartir cartas
         const deck = generateDeck();
         const hands = {};
         const players = Object.keys(currentGame.hands);
@@ -532,6 +538,8 @@ async function advanceLevel() {
         isAdvancing = false;
     }
 }
+
+
 
 async function proposeStar() {
     if (!gameState || gameState.stars <= 0) return;
