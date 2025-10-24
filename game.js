@@ -291,22 +291,19 @@ function showGameScreen() {
 
 // Actualizar UI del juego
 // Actualizar UI del juego
+// Actualizar UI del juego
 function updateGameUI() {
     if (!gameState) {
         console.log('No hay gameState todavía');
         return;
     }
     
-    // Verificar que el juego esté iniciado
-    if (!gameState.hands || !gameState.centralPile) {
-        console.log('El juego no está completamente iniciado');
-        return;
-    }
+    console.log('Actualizando UI con mano:', gameState.hands[currentPlayer]);
     
     // Actualizar vidas
     document.getElementById('livesDisplay').innerHTML = '❤️'.repeat(gameState.lives || 0);
     
-    // Actualizar nivel
+    // Actualizar nivel  
     document.getElementById('levelDisplay').textContent = gameState.level || 1;
     
     // Actualizar estrellas
@@ -332,8 +329,10 @@ function updateGameUI() {
     }
     
     // Actualizar mano del jugador
-    const myHand = gameState.hands[currentPlayer] || [];
+    const myHand = gameState.hands && gameState.hands[currentPlayer] ? gameState.hands[currentPlayer] : [];
     const handDiv = document.getElementById('playerHand');
+    
+    console.log('Mi mano:', myHand);
     
     if (myHand.length === 0) {
         handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
@@ -353,6 +352,7 @@ function updateGameUI() {
         showGameOver();
     }
 }
+
 
 
 // Jugar una carta
