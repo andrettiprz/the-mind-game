@@ -26,7 +26,6 @@ const GAME_CONFIG = {
     4: { levels: 8, lives: 4, stars: 1 }
 };
 
-// RECOMPENSAS según las reglas oficiales: nivel 2,3,5,6,8,9
 const LEVEL_REWARDS = {
     2: 'star',
     3: 'life',
@@ -35,6 +34,13 @@ const LEVEL_REWARDS = {
     8: 'star',
     9: 'life'
 };
+
+// FUNCIÓN HELPER: Siempre convierte a array
+function ensureArray(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value;
+    return [value];
+}
 
 window.createRoom = createRoom;
 window.joinRoom = joinRoom;
@@ -177,7 +183,6 @@ async function startGameFromWaiting() {
         const deck = generateDeck();
         const hands = {};
         
-        // Nivel 1: cada jugador recibe 1 carta
         players.forEach(player => {
             hands[player] = [deck.pop()];
         });
@@ -249,31 +254,19 @@ function updateGameUI() {
             cardsPlayedList.innerHTML = '';
         }
         
-        const myHand = gameState.hands[currentPlayer] || [];
+        // USAR ensureArray para manejar el problema de Firebase
+        const myHand = ensureArray(gameState.hands[currentPlayer]);
         const handDiv = document.getElementById('playerHand');
         
-        if (!Array.isArray(myHand)) {
-            const handArray = myHand ? [myHand] : [];
-            if (handArray.length === 0) {
-                handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
-            } else {
-                handDiv.innerHTML = handArray.map(card => 
-                    `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
-                        ${card}
-                    </button>`
-                ).join('');
-            }
+        if (myHand.length === 0) {
+            handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
         } else {
-            if (myHand.length === 0) {
-                handDiv.innerHTML = '<p class="text-center opacity-60 py-8">No tienes cartas</p>';
-            } else {
-                const sortedHand = [...myHand].sort((a, b) => a - b);
-                handDiv.innerHTML = sortedHand.map(card => 
-                    `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
-                        ${card}
-                    </button>`
-                ).join('');
-            }
+            const sortedHand = [...myHand].sort((a, b) => a - b);
+            handDiv.innerHTML = sortedHand.map(card => 
+                `<button onclick="playCard(${card})" class="bg-gradient-to-br from-orange-400 to-red-500 hover:from-orange-500 hover:to-red-600 rounded-xl p-6 min-w-[100px] text-4xl font-bold transform transition hover:scale-110 shadow-xl">
+                    ${card}
+                </button>`
+            ).join('');
         }
         
         updateStarControl();
@@ -288,32 +281,30 @@ function updateGameUI() {
 
 async function playCard(cardValue) {
     try {
-        // Obtener el estado MÁS RECIENTE de Firebase
         const roomRef = ref(database, `rooms/${currentRoomId}/game`);
         const snapshot = await get(roomRef);
         const freshGame = snapshot.val();
         
         if (!freshGame || !freshGame.hands) return;
         
-        let myHand = freshGame.hands[currentPlayer];
-        if (!Array.isArray(myHand)) {
-            myHand = myHand ? [myHand] : [];
-        }
+        // USAR ensureArray
+        const myHand = ensureArray(freshGame.hands[currentPlayer]);
         
         if (!myHand.includes(cardValue)) return;
         
-        // Verificar si es válido jugar esta carta
         const centralPile = freshGame.centralPile || [];
+        
+        // Verificar si es válido
         if (centralPile.length > 0) {
             const lastCard = centralPile[centralPile.length - 1];
             if (cardValue < lastCard) {
-                // ERROR: carta menor
+                // ERROR: NO actualizamos la mano aquí, llamamos handleError con la carta que se intentó jugar
                 await handleError(cardValue, freshGame);
                 return;
             }
         }
         
-        // Jugar la carta
+        // Jugar la carta (quitar de mano y agregar a pila)
         const newHand = myHand.filter(c => c !== cardValue);
         const newPile = [...centralPile, cardValue];
         
@@ -329,16 +320,15 @@ async function playCard(cardValue) {
             
             if (checkGame && checkGame.hands) {
                 const allEmpty = Object.values(checkGame.hands).every(hand => {
-                    if (!hand) return true;
-                    if (Array.isArray(hand)) return hand.length === 0;
-                    return false;
+                    const handArray = ensureArray(hand);
+                    return handArray.length === 0;
                 });
                 
                 if (allEmpty) {
                     await advanceLevel();
                 }
             }
-        }, 800);
+        }, 1000);
         
     } catch (error) {
         console.error('Error:', error);
@@ -360,21 +350,16 @@ async function handleError(wrongCard, freshGame) {
             return;
         }
         
-        // Descartar cartas menores que la última jugada
-        const lastCorrectCard = freshGame.centralPile.length > 0 ? 
-            freshGame.centralPile[freshGame.centralPile.length - 1] : 0;
-        
         const updates = { lives: newLives };
         const discarded = freshGame.discardedCards || [];
         
+        // Descartar TODAS las cartas <= wrongCard de TODAS las manos
         Object.keys(freshGame.hands).forEach(player => {
-            let playerHand = freshGame.hands[player];
-            if (!Array.isArray(playerHand)) {
-                playerHand = playerHand ? [playerHand] : [];
-            }
+            const playerHand = ensureArray(freshGame.hands[player]);
             
-            // Descartar cartas menores o iguales a la carta incorrecta
+            // Cartas a descartar: <= wrongCard
             const toDiscard = playerHand.filter(c => c <= wrongCard);
+            // Nueva mano: solo cartas > wrongCard
             const newHand = playerHand.filter(c => c > wrongCard);
             
             discarded.push(...toDiscard);
@@ -384,7 +369,7 @@ async function handleError(wrongCard, freshGame) {
         updates.discardedCards = discarded;
         
         await update(gameRef, updates);
-        alert(`❌ ¡Error! Carta ${wrongCard} jugada fuera de orden. Perdieron 1 vida.`);
+        alert(`❌ ¡Error! Carta ${wrongCard} jugada fuera de orden.\nPerdieron 1 vida. Se descartaron cartas ≤ ${wrongCard}.`);
         
     } catch (error) {
         console.error('Error handler:', error);
@@ -393,7 +378,6 @@ async function handleError(wrongCard, freshGame) {
 
 async function advanceLevel() {
     try {
-        // Obtener estado actual
         const roomRef = ref(database, `rooms/${currentRoomId}`);
         const snapshot = await get(roomRef);
         const room = snapshot.val();
@@ -404,7 +388,6 @@ async function advanceLevel() {
         const nextLevel = currentGame.level + 1;
         
         if (nextLevel > currentGame.maxLevels) {
-            // ¡VICTORIA!
             const gameRef = ref(database, `rooms/${currentRoomId}/game`);
             await update(gameRef, {
                 gameOver: true,
@@ -413,24 +396,17 @@ async function advanceLevel() {
             return;
         }
         
-        // Aplicar recompensa del nivel completado
         let newLives = currentGame.lives;
         let newStars = currentGame.stars;
         
         const reward = LEVEL_REWARDS[currentGame.level];
-        if (reward === 'life' && newLives < 5) {
-            newLives++;
-        }
-        if (reward === 'star' && newStars < 3) {
-            newStars++;
-        }
+        if (reward === 'life' && newLives < 5) newLives++;
+        if (reward === 'star' && newStars < 3) newStars++;
         
-        // Repartir nuevas cartas para el siguiente nivel
         const deck = generateDeck();
         const hands = {};
         const players = Object.keys(currentGame.hands);
         
-        // Cada jugador recibe tantas cartas como el nivel
         players.forEach(player => {
             const hand = [];
             for (let i = 0; i < nextLevel; i++) {
@@ -515,12 +491,8 @@ async function useStar() {
         
         const discarded = freshGame.discardedCards || [];
         
-        // Cada jugador descarta su carta MÁS BAJA
         Object.keys(freshGame.hands).forEach(player => {
-            let hand = freshGame.hands[player];
-            if (!Array.isArray(hand)) {
-                hand = hand ? [hand] : [];
-            }
+            const hand = ensureArray(freshGame.hands[player]);
             if (hand.length > 0) {
                 const sorted = [...hand].sort((a, b) => a - b);
                 const lowest = sorted[0];
