@@ -526,7 +526,7 @@ async function advanceLevel() {
         
         const deck = generateDeck();
         const hands = {};
-        const players = Object.keys(currentGame.hands);
+        const players = Object.keys(room.players);
         
         console.log(`Repartiendo ${nextLevel} cartas a ${players.length} jugadores`);
         
@@ -545,17 +545,24 @@ async function advanceLevel() {
         
         console.log('Actualizando Firebase...');
         
-        // ACTUALIZACIÓN ATÓMICA: Todo en una sola llamada
+        // ACTUALIZACIÓN POR PARTES: Primero el deck y estado, LUEGO las hands
         await update(gameRef, {
             level: nextLevel,
             lives: newLives,
             stars: newStars,
             deck: deck,
-            hands: hands,
             centralPile: [],
             discardedCards: [],
             starProposal: null,
             starVotes: {}
+        });
+        
+        // PEQUEÑO DELAY
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        // LUEGO actualizar las manos
+        await update(gameRef, {
+            hands: hands
         });
         
         console.log('✓ Nivel actualizado en Firebase');
@@ -575,6 +582,7 @@ async function advanceLevel() {
         isAdvancing = false;
     }
 }
+
 
 async function proposeStar() {
     if (!gameState || gameState.stars <= 0) return;
