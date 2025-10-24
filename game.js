@@ -219,6 +219,7 @@ function updateWaitingScreen(room) {
 }
 
 // Iniciar partida desde sala de espera
+// Iniciar partida desde sala de espera
 async function startGameFromWaiting() {
     try {
         console.log('Iniciando partida...');
@@ -234,11 +235,15 @@ async function startGameFromWaiting() {
         
         // Repartir 1 carta a cada jugador (nivel 1)
         players.forEach(player => {
-            hands[player] = [deck.pop()];
-            console.log(`Carta para ${player}:`, hands[player]);
+            // IMPORTANTE: Siempre usar arrays, incluso para una carta
+            const hand = [deck.pop()];
+            hands[player] = hand;
+            console.log(`Carta para ${player}:`, hand);
         });
         
+        console.log('Manos finales:', hands);
         console.log('Actualizando sala...');
+        
         await update(roomRef, {
             status: 'playing',
             game: {
@@ -262,6 +267,7 @@ async function startGameFromWaiting() {
         alert('Error al iniciar: ' + error.message);
     }
 }
+
 
 
 // Generar mazo de 100 cartas
@@ -356,18 +362,37 @@ function updateGameUI() {
 
 
 // Jugar una carta
+// Jugar una carta
 async function playCard(cardValue) {
-    if (!gameState) return;
+    if (!gameState) {
+        console.log('No hay gameState');
+        return;
+    }
+    
+    console.log('Intentando jugar carta:', cardValue);
+    console.log('Estado del juego:', gameState);
     
     const myHand = gameState.hands[currentPlayer];
-    if (!myHand || !myHand.includes(cardValue)) return;
     
-    // Verificar si la carta es correcta
-    const centralPile = gameState.centralPile;
+    // VALIDACIÓN: Asegurarse de que myHand es un array
+    if (!myHand || !Array.isArray(myHand)) {
+        console.error('Error: la mano no es un array válido', myHand);
+        alert('Error: tu mano no está correctamente inicializada');
+        return;
+    }
+    
+    if (!myHand.includes(cardValue)) {
+        console.log('No tienes esa carta');
+        return;
+    }
+    
+    // Verificar si la carta es correcta (en The Mind solo importa que sea mayor)
+    const centralPile = gameState.centralPile || [];
     if (centralPile.length > 0) {
         const lastCard = centralPile[centralPile.length - 1];
         if (cardValue < lastCard) {
             // ERROR: carta menor que la última jugada
+            console.log(`Error: ${cardValue} es menor que ${lastCard}`);
             await handleError(cardValue);
             return;
         }
@@ -376,6 +401,9 @@ async function playCard(cardValue) {
     // Jugar la carta
     const newHand = myHand.filter(c => c !== cardValue);
     const newPile = [...centralPile, cardValue];
+    
+    console.log('Nueva mano:', newHand);
+    console.log('Nueva pila:', newPile);
     
     const gameRef = ref(database, `rooms/${currentRoomId}/game`);
     await update(gameRef, {
@@ -386,6 +414,7 @@ async function playCard(cardValue) {
     // Verificar si todos terminaron sus cartas
     await checkLevelComplete();
 }
+
 
 // Manejar error (carta jugada fuera de orden)
 async function handleError(wrongCard) {
