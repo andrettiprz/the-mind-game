@@ -365,26 +365,44 @@ async function playCard(cardValue) {
 }
 
 // Verificar nivel completo AUTOMÁTICAMENTE cuando Firebase actualiza
+// Verificar nivel completo AUTOMÁTICAMENTE cuando Firebase actualiza
 async function checkLevelCompleteAuto(prevState) {
     try {
-        if (!gameState || !gameState.hands || checkingLevel) return;
+        if (!gameState || !gameState.hands || checkingLevel || gameState.gameOver) return;
         
+        // Verificar que TODAS las manos estén vacías
         const allHandsEmpty = Object.values(gameState.hands).every(hand => {
             if (!hand) return true;
             if (Array.isArray(hand)) return hand.length === 0;
             return false;
         });
         
-        if (allHandsEmpty && !gameState.gameOver) {
-            checkingLevel = true;
-            await advanceLevel();
-            checkingLevel = false;
+        // SOLO avanzar si TODAS las manos están vacías Y hay al menos una carta en la pila central
+        if (allHandsEmpty && gameState.centralPile && gameState.centralPile.length > 0) {
+            // Verificar que el prevState tenía cartas (para evitar llamar al inicio)
+            if (prevState && prevState.hands) {
+                const prevHadCards = Object.values(prevState.hands).some(hand => {
+                    if (!hand) return false;
+                    if (Array.isArray(hand)) return hand.length > 0;
+                    return false;
+                });
+                
+                // Solo avanzar si antes había cartas y ahora no
+                if (prevHadCards) {
+                    checkingLevel = true;
+                    setTimeout(async () => {
+                        await advanceLevel();
+                        checkingLevel = false;
+                    }, 500);
+                }
+            }
         }
     } catch (error) {
         console.error('Error verificando nivel:', error);
         checkingLevel = false;
     }
 }
+
 
 // Manejar error
 async function handleError(wrongCard) {
